@@ -9,6 +9,33 @@ def detect_chile_context(text: str, context_terms: List[str]) -> bool:
     return contains_any_term(text, context_terms)
 
 
+def detect_chile_origin(tweet: Dict, context_terms: List[str]) -> bool:
+    place = tweet.get("place") or {}
+    author = tweet.get("author") or {}
+
+    direct_country_signals = [
+        place.get("countryCode"),
+        place.get("country"),
+        tweet.get("countryCode"),
+        tweet.get("country"),
+        author.get("location"),
+    ]
+    for signal in direct_country_signals:
+        normalized_signal = normalize_text(str(signal or ""))
+        if normalized_signal in {"cl", "chile"} or " chile " in f" {normalized_signal} ":
+            return True
+
+    combined_text = " ".join(
+        [
+            tweet.get("text", "") or "",
+            place.get("fullName", "") or "",
+            place.get("name", "") or "",
+            author.get("location", "") or "",
+        ]
+    )
+    return detect_chile_context(combined_text, context_terms)
+
+
 def classify_tweet(tweet: Dict, catalog: dict) -> Dict:
     text = tweet.get("text", "")
     normalized = normalize_text(text)
@@ -37,6 +64,7 @@ def classify_tweet(tweet: Dict, catalog: dict) -> Dict:
         "normalized_text": normalized,
         "is_spanish": looks_spanish(tweet),
         "is_chile_context": detect_chile_context(normalized, catalog["chile_context_terms"]),
+        "is_chile_origin": detect_chile_origin(tweet, catalog["chile_context_terms"]),
         "matches": matches,
         "category_detected": category_detected,
         "matched_keyword": first_keyword,
@@ -44,7 +72,12 @@ def classify_tweet(tweet: Dict, catalog: dict) -> Dict:
     }
 
 
-def post_process_tweets(tweets: List[Dict], catalog: dict, strict_keyword_filter: bool = True) -> List[Dict]:
+def post_process_tweets(
+    tweets: List[Dict],
+    catalog: dict,
+    strict_keyword_filter: bool = True,
+    chile_only: bool = False,
+) -> List[Dict]:
     processed = []
     seen_ids = set()
 
@@ -56,6 +89,8 @@ def post_process_tweets(tweets: List[Dict], catalog: dict, strict_keyword_filter
 
         enriched = {**tweet, **classify_tweet(tweet, catalog)}
         if not enriched["is_spanish"]:
+            continue
+        if chile_only and not enriched["is_chile_origin"]:
             continue
         if strict_keyword_filter and not enriched["matches"]:
             continue

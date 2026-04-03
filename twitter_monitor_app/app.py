@@ -186,11 +186,13 @@ def main():
             st.error(str(exc))
             return
 
-        processed = post_process_tweets(raw_tweets, catalog)
+        processed = post_process_tweets(raw_tweets, catalog, chile_only=filters["chile_only"])
         df = build_dataframe(processed, catalog)
 
     render_kpis(df)
     render_limitations(df)
+    if filters["chile_only"]:
+        st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
 
     st.subheader("Resultados")
     render_results_table(df)

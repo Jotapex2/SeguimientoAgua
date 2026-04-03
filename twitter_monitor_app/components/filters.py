@@ -21,6 +21,7 @@ def render_sidebar_filters(catalog: dict):
     date_range = st.sidebar.date_input("Rango de fechas", value=(date.today() - timedelta(days=7), date.today()))
     limit = st.sidebar.slider("Límite de resultados", min_value=20, max_value=settings.max_limit, value=settings.default_limit, step=20)
     include_user_timelines = st.sidebar.toggle("Incluir timelines de usuarios monitoreados", value=False)
+    chile_only = st.sidebar.toggle("Sólo posts hechos desde Chile (CL)", value=False)
     export_only_high_views = st.sidebar.toggle("Exportar sólo posts con viewCount > 1000", value=False)
     run = st.sidebar.button("Ejecutar monitoreo", use_container_width=True, type="primary")
 
@@ -38,6 +39,7 @@ def render_sidebar_filters(catalog: dict):
         "end_date": end_date,
         "limit": limit,
         "include_user_timelines": include_user_timelines,
+        "chile_only": chile_only,
         "export_only_high_views": export_only_high_views,
         "run": run,
     }
