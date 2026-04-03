@@ -17,8 +17,18 @@ from data.keywords import get_default_catalog
 from services.classifier import post_process_tweets
 from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
 from services.query_builder import append_date_operators, build_query_plan
+from services.runtime_store import (
+    get_history_count,
+    load_cache,
+    load_incremental_state,
+    make_cache_key,
+    persist_history,
+    save_cache,
+    update_incremental_state,
+)
 from services.scoring import enrich_scores
 from services.twitter_client import TwitterApiError, TwitterClient
+from utils.helpers import parse_datetime
 
 logging.basicConfig(level=logging.INFO)
 
@@ -81,7 +91,32 @@ def mock_tweets() -> List[Dict]:
     ]
 
 
-def collect_api_data(filters: Dict, catalog: dict) -> List[Dict]:
+def get_strategy_profile(strategy: str, requested_limit: int) -> Dict[str, int]:
+    if strategy == "Rápida":
+        return {"effective_limit": min(requested_limit, 200), "max_batches": 6, "timeline_limit": 10, "min_per_query": 20}
+    if strategy == "Profunda":
+        return {"effective_limit": requested_limit, "max_batches": 9999, "timeline_limit": 40, "min_per_query": 50}
+    return {"effective_limit": min(requested_limit, 1000), "max_batches": 20, "timeline_limit": 20, "min_per_query": 20}
+
+
+def prioritize_query_plan(query_plan: List[Dict], strategy: str) -> List[Dict]:
+    ordered = sorted(
+        query_plan,
+        key=lambda item: (
+            0 if item["category"] in {"Personas", "Empresas"} else 1,
+            len(item["query"]),
+        ),
+    )
+    max_batches = get_strategy_profile(strategy, 0)["max_batches"]
+    return ordered[:max_batches]
+
+
+def newest_created_at(tweets: List[Dict]) -> str | None:
+    timestamps = [tweet.get("createdAt") for tweet in tweets if tweet.get("createdAt")]
+    return max(timestamps) if timestamps else None
+
+
+def collect_api_data(filters: Dict, catalog: dict) -> tuple[List[Dict], Dict]:
     client = TwitterClient()
     collected: List[Dict] = []
     query_plan = build_query_plan(
@@ -90,34 +125,80 @@ def collect_api_data(filters: Dict, catalog: dict) -> List[Dict]:
         filters["selected_companies"],
         catalog,
     )
+    strategy_profile = get_strategy_profile(filters["strategy"], filters["limit"])
+    query_plan = prioritize_query_plan(query_plan, filters["strategy"])
+    incremental_state = load_incremental_state()
+    stats = {"api_calls_saved_by_cache": 0, "query_batches": len(query_plan), "effective_limit": strategy_profile["effective_limit"]}
 
     if not client.enabled:
         raise TwitterApiError("No hay API key configurada. Activa simulación o define TWITTERAPI_IO_KEY.")
 
-    per_query_limit = max(20, filters["limit"] // max(len(query_plan), 1))
+    per_query_limit = max(
+        strategy_profile["min_per_query"],
+        strategy_profile["effective_limit"] // max(len(query_plan), 1),
+    )
 
     for item in query_plan:
         query = append_date_operators(item["query"], filters["start_date"], filters["end_date"])
-        tweets = client.search_tweets(
-            query=query,
-            max_results=per_query_limit,
-            start_date=filters["start_date"],
-            end_date=filters["end_date"],
-        )
+        state_key = make_cache_key("incremental", {"query": query, "category": item["category"]})
+        since_time = None
+        if filters["incremental_mode"]:
+            last_seen = incremental_state.get(state_key)
+            parsed = parse_datetime(last_seen)
+            if parsed:
+                since_time = int(parsed.timestamp()) + 1
+
+        cache_payload = {
+            "mode": "search",
+            "query": query,
+            "max_results": per_query_limit,
+            "start_date": filters["start_date"],
+            "end_date": filters["end_date"],
+            "since_time": since_time,
+            "strategy": filters["strategy"],
+        }
+        cache_key = make_cache_key("search", cache_payload)
+        tweets = load_cache(cache_key, filters["cache_ttl_hours"]) if filters["use_cache"] else None
+        if tweets is None:
+            tweets = client.search_tweets(
+                query=query,
+                max_results=per_query_limit,
+                start_date=filters["start_date"],
+                end_date=filters["end_date"],
+                since_time=since_time,
+            )
+            if filters["use_cache"]:
+                save_cache(cache_key, tweets)
+        else:
+            stats["api_calls_saved_by_cache"] += 1
+
         for tweet in tweets:
             tweet["query_batch"] = item["query"]
             tweet["query_category"] = item["category"]
         collected.extend(tweets)
+        update_incremental_state(state_key, newest_created_at(tweets))
 
     if filters["include_user_timelines"]:
         for username in catalog["monitor_users"]:
-            tweets = client.get_user_tweets(username=username, max_results=20)
+            cache_payload = {
+                "mode": "timeline",
+                "username": username,
+                "max_results": strategy_profile["timeline_limit"],
+            }
+            cache_key = make_cache_key("timeline", cache_payload)
+            tweets = load_cache(cache_key, filters["cache_ttl_hours"]) if filters["use_cache"] else None
+            if tweets is None:
+                tweets = client.get_user_tweets(username=username, max_results=strategy_profile["timeline_limit"])
+                if filters["use_cache"]:
+                    save_cache(cache_key, tweets)
+            else:
+                stats["api_calls_saved_by_cache"] += 1
             for tweet in tweets:
                 tweet["query_batch"] = f"user:{username}"
                 tweet["query_category"] = "Timeline"
             collected.extend(tweets)
 
-    return collected
+    return collected, stats
 
 
 def build_dataframe(tweets: List[Dict], catalog: dict) -> pd.DataFrame:
@@ -163,6 +244,22 @@ def build_export_dataframe(df: pd.DataFrame, export_only_high_views: bool) -> pd
     return export_df
 
 
+def render_efficiency_summary(filters: Dict, query_stats: Dict, df: pd.DataFrame):
+    history_count = get_history_count()
+    messages = [
+        f"Estrategia activa: {filters['strategy']}.",
+        f"Límite efectivo aplicado en esta corrida: {query_stats.get('effective_limit', filters['limit'])}.",
+        f"Batches ejecutados: {query_stats.get('query_batches', 0)}.",
+    ]
+    if filters["use_cache"]:
+        messages.append(f"Consultas evitadas por caché: {query_stats.get('api_calls_saved_by_cache', 0)}.")
+    if filters["incremental_mode"]:
+        messages.append("Modo incremental activo: se intentó pedir sólo contenido nuevo por query.")
+    messages.append(f"Histórico local acumulado: {history_count} posts.")
+    messages.append(f"Posts procesados en la corrida actual: {len(df)}.")
+    st.caption(" ".join(messages))
+
+
 def main():
     settings = get_settings()
     st.set_page_config(page_title=settings.app_name, layout="wide")
@@ -181,16 +278,22 @@ def main():
 
     with st.spinner("Consultando y procesando tweets..."):
         try:
-            raw_tweets = mock_tweets() if filters["simulation_mode"] else collect_api_data(filters, catalog)
+            if filters["simulation_mode"]:
+                raw_tweets = mock_tweets()
+                query_stats = {"api_calls_saved_by_cache": 0, "query_batches": 0, "effective_limit": filters["limit"]}
+            else:
+                raw_tweets, query_stats = collect_api_data(filters, catalog)
         except TwitterApiError as exc:
             st.error(str(exc))
             return
 
         processed = post_process_tweets(raw_tweets, catalog, chile_only=filters["chile_only"])
         df = build_dataframe(processed, catalog)
+        persist_history(df.to_dict(orient="records"))
 
     render_kpis(df)
     render_limitations(df)
+    render_efficiency_summary(filters, query_stats, df)
     if filters["chile_only"]:
         st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
 

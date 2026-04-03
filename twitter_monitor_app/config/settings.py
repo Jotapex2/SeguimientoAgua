@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
@@ -19,6 +20,8 @@ class AppConfig:
     backoff_factor: float = 1.5
     page_size: int = 20
     default_query_type: str = "Latest"
+    default_cache_ttl_hours: int = 6
+    runtime_dir: Path = Path(__file__).resolve().parents[1] / "data" / "runtime"
     supported_languages: List[str] = field(default_factory=lambda: ["es"])
     priority_people_boost: float = 10.0
     context_terms: List[str] = field(

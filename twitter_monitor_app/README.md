@@ -19,6 +19,9 @@ La integración está basada en `twitterapi.io`, no en la API oficial de X/Twitt
 - Dashboard ejecutivo con KPIs, rankings y gráficos.
 - Exportación a CSV y Excel.
 - Modo simulación sin API para probar la UI.
+- Caché local en disco para evitar consultas repetidas.
+- Modo incremental para traer sólo posts nuevos por query.
+- Estrategias de consumo API: `Rápida`, `Balanceada`, `Profunda`.
 
 ## Estructura
 
@@ -93,6 +96,22 @@ La app activa por defecto el modo `Simulación sin API`. Esto permite:
 - validar filtros y exportación
 - evitar consumo de créditos o rate limit
 
+## Eficiencia de consumo API
+
+La app incluye tres mecanismos para bajar costo:
+
+- `Rápida`: limita batches y volumen total; sirve para exploración ejecutiva.
+- `Balanceada`: punto medio para operación diaria.
+- `Profunda`: usa más batches y deja crecer el volumen solicitado.
+- `Usar caché local`: reutiliza respuestas recientes en `data/runtime/cache/`.
+- `Modo incremental`: guarda el último `createdAt` por query y pide sólo contenido nuevo cuando es posible.
+
+Persistencia local:
+
+- histórico consolidado en `data/runtime/history.json`
+- estado incremental en `data/runtime/incremental_state.json`
+- respuestas cacheadas en `data/runtime/cache/`
+
 ## Endpoints usados
 
 - `GET /twitter/tweet/advanced_search`
@@ -128,4 +147,3 @@ Cada tweet procesado devuelve:
 - Las queries largas se dividen en batches automáticos.
 - Si el filtro `lang:es` no fuese soportado de forma consistente por la API, la app filtra idioma en Python.
 - La detección de contexto chileno es heurística, basada en términos como `Chile`, `SISS`, `DGA`, `MOP`, regiones y `APR`.
-

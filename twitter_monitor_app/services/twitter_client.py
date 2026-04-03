@@ -90,12 +90,25 @@ class TwitterClient:
 
         return results[:max_results]
 
-    def search_tweets(self, query: str, max_results: int = 40, start_date=None, end_date=None, query_type: str = "Latest") -> List[Dict]:
+    def search_tweets(
+        self,
+        query: str,
+        max_results: int = 40,
+        start_date=None,
+        end_date=None,
+        query_type: str = "Latest",
+        since_time: int | None = None,
+        until_time: int | None = None,
+    ) -> List[Dict]:
         params: Dict[str, object] = {
             "query": query,
             "queryType": query_type,
         }
         start_ts, end_ts = ensure_utc_bounds(start_date, end_date)
+        if since_time is not None:
+            start_ts = since_time
+        if until_time is not None:
+            end_ts = until_time
         if start_ts:
             params["sinceTime"] = start_ts
         if end_ts:
