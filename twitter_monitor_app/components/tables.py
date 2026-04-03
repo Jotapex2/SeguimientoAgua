@@ -22,7 +22,7 @@ def render_results_table(df: pd.DataFrame):
             "url",
         ]
     ].sort_values(["relevance_score", "risk_score"], ascending=False)
-    st.dataframe(preview, use_container_width=True, hide_index=True)
+    st.dataframe(preview, width="stretch", hide_index=True)
 
 
 def render_rankings(df: pd.DataFrame):
@@ -33,7 +33,7 @@ def render_rankings(df: pd.DataFrame):
     with col1:
         st.subheader("Ranking de tweets")
         top_tweets = df.nlargest(10, "relevance_score")[["author_username", "matched_keyword", "relevance_score", "risk_score", "text"]]
-        st.dataframe(top_tweets, use_container_width=True, hide_index=True)
+        st.dataframe(top_tweets, width="stretch", hide_index=True)
     with col2:
         st.subheader("Ranking de autores")
         top_authors = (
@@ -43,4 +43,4 @@ def render_rankings(df: pd.DataFrame):
             .sort_values(["tweets", "avg_relevance"], ascending=False)
             .head(10)
         )
-        st.dataframe(top_authors, use_container_width=True, hide_index=True)
+        st.dataframe(top_authors, width="stretch", hide_index=True)

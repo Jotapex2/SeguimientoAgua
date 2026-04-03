@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import streamlit as st
 
-from config.settings import get_settings
+from twitter_monitor_app.config.settings import get_settings
 
 
 def render_sidebar_filters(catalog: dict):
@@ -27,7 +27,7 @@ def render_sidebar_filters(catalog: dict):
     include_user_timelines = st.sidebar.toggle("Incluir timelines de usuarios monitoreados", value=False)
     chile_only = st.sidebar.toggle("Sólo posts hechos desde Chile (CL)", value=False)
     export_only_high_views = st.sidebar.toggle("Exportar sólo posts con viewCount > 1000", value=False)
-    run = st.sidebar.button("Ejecutar monitoreo", use_container_width=True, type="primary")
+    run = st.sidebar.button("Ejecutar monitoreo", width="stretch", type="primary")
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range

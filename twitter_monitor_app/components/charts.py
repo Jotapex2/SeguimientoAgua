@@ -21,7 +21,7 @@ def render_charts(df: pd.DataFrame):
         .sort_values("tweets", ascending=False)
     )
     fig_categories = px.bar(category_counts, x="category_list", y="tweets", title="Tweets por categoría")
-    col1.plotly_chart(fig_categories, use_container_width=True)
+    col1.plotly_chart(fig_categories, width="stretch")
 
     top_authors = (
         df.groupby("author_username", dropna=False)
@@ -31,7 +31,7 @@ def render_charts(df: pd.DataFrame):
         .head(10)
     )
     fig_authors = px.bar(top_authors, x="author_username", y="tweets", title="Top autores")
-    col2.plotly_chart(fig_authors, use_container_width=True)
+    col2.plotly_chart(fig_authors, width="stretch")
 
     timeline = (
         df.assign(created_day=pd.to_datetime(df["createdAt"], errors="coerce").dt.date)
@@ -42,4 +42,4 @@ def render_charts(df: pd.DataFrame):
     )
     if not timeline.empty:
         fig_timeline = px.line(timeline, x="created_day", y="tweets", markers=True, title="Evolución temporal")
-        st.plotly_chart(fig_timeline, use_container_width=True)
+        st.plotly_chart(fig_timeline, width="stretch")

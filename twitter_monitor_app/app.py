@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
 
-from components.charts import render_charts
-from components.filters import render_sidebar_filters
-from components.metrics import render_kpis
-from components.tables import render_rankings, render_results_table
-from components.taxonomy_editor import render_taxonomy_editor
-from config.settings import get_settings
-from data.keywords import get_default_catalog
-from services.classifier import post_process_tweets
-from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
-from services.query_builder import append_date_operators, build_query_plan
-from services.runtime_store import (
+PACKAGE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from twitter_monitor_app.components.charts import render_charts
+from twitter_monitor_app.components.filters import render_sidebar_filters
+from twitter_monitor_app.components.metrics import render_kpis
+from twitter_monitor_app.components.tables import render_rankings, render_results_table
+from twitter_monitor_app.components.taxonomy_editor import render_taxonomy_editor
+from twitter_monitor_app.config.settings import get_settings
+from twitter_monitor_app.data.keywords import get_default_catalog
+from twitter_monitor_app.services.classifier import post_process_tweets
+from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
+from twitter_monitor_app.services.query_builder import append_date_operators, build_query_plan
+from twitter_monitor_app.services.runtime_store import (
     get_history_count,
     load_cache,
     load_incremental_state,
@@ -26,9 +33,9 @@ from services.runtime_store import (
     save_cache,
     update_incremental_state,
 )
-from services.scoring import enrich_scores
-from services.twitter_client import TwitterApiError, TwitterClient
-from utils.helpers import parse_datetime
+from twitter_monitor_app.services.scoring import enrich_scores
+from twitter_monitor_app.services.twitter_client import TwitterApiError, TwitterClient
+from twitter_monitor_app.utils.helpers import parse_datetime
 
 logging.basicConfig(level=logging.INFO)
 
