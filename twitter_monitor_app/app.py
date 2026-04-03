@@ -11,8 +11,9 @@ from components.charts import render_charts
 from components.filters import render_sidebar_filters
 from components.metrics import render_kpis
 from components.tables import render_rankings, render_results_table
+from components.taxonomy_editor import render_taxonomy_editor
 from config.settings import get_settings
-from data.keywords import MONITOR_USERS
+from data.keywords import get_default_catalog
 from services.classifier import post_process_tweets
 from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
 from services.query_builder import append_date_operators, build_query_plan
@@ -80,13 +81,14 @@ def mock_tweets() -> List[Dict]:
     ]
 
 
-def collect_api_data(filters: Dict) -> List[Dict]:
+def collect_api_data(filters: Dict, catalog: dict) -> List[Dict]:
     client = TwitterClient()
     collected: List[Dict] = []
     query_plan = build_query_plan(
         filters["selected_categories"],
         filters["selected_people"],
         filters["selected_companies"],
+        catalog,
     )
 
     if not client.enabled:
@@ -108,7 +110,7 @@ def collect_api_data(filters: Dict) -> List[Dict]:
         collected.extend(tweets)
 
     if filters["include_user_timelines"]:
-        for username in MONITOR_USERS:
+        for username in catalog["monitor_users"]:
             tweets = client.get_user_tweets(username=username, max_results=20)
             for tweet in tweets:
                 tweet["query_batch"] = f"user:{username}"
@@ -118,10 +120,10 @@ def collect_api_data(filters: Dict) -> List[Dict]:
     return collected
 
 
-def build_dataframe(tweets: List[Dict]) -> pd.DataFrame:
+def build_dataframe(tweets: List[Dict], catalog: dict) -> pd.DataFrame:
     normalized_rows = []
     for tweet in tweets:
-        enriched = enrich_scores(tweet)
+        enriched = enrich_scores(tweet, catalog)
         author = enriched.get("author", {}) or {}
         normalized_rows.append(
             {
@@ -157,7 +159,11 @@ def main():
     st.title(settings.app_name)
     st.caption("Monitoreo ejecutivo para conversaciones del sector sanitario, hídrico y regulatorio en Chile.")
 
-    filters = render_sidebar_filters()
+    default_catalog = get_default_catalog()
+    if "catalog" not in st.session_state:
+        st.session_state["catalog"] = get_default_catalog()
+    catalog = render_taxonomy_editor(st.session_state["catalog"], default_catalog)
+    filters = render_sidebar_filters(catalog)
 
     if not filters["run"]:
         st.info("Configura filtros y ejecuta el monitoreo. El modo simulación está habilitado por defecto para probar la UI sin consumir la API.")
@@ -165,13 +171,13 @@ def main():
 
     with st.spinner("Consultando y procesando tweets..."):
         try:
-            raw_tweets = mock_tweets() if filters["simulation_mode"] else collect_api_data(filters)
+            raw_tweets = mock_tweets() if filters["simulation_mode"] else collect_api_data(filters, catalog)
         except TwitterApiError as exc:
             st.error(str(exc))
             return
 
-        processed = post_process_tweets(raw_tweets)
-        df = build_dataframe(processed)
+        processed = post_process_tweets(raw_tweets, catalog)
+        df = build_dataframe(processed, catalog)
 
     render_kpis(df)
     render_limitations(df)

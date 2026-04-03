@@ -4,15 +4,16 @@ from datetime import date, timedelta
 
 import streamlit as st
 
-from data.keywords import COMPANIES, PEOPLE, SECTOR_TOPICS
-
-
-def render_sidebar_filters():
+def render_sidebar_filters(catalog: dict):
     st.sidebar.header("Filtros")
+    sector_topics = catalog["sector_topics"]
+    people = catalog["people"]
+    companies = catalog["companies"]
     simulation_mode = st.sidebar.toggle("Simulación sin API", value=True)
-    selected_categories = st.sidebar.multiselect("Categorías", options=list(SECTOR_TOPICS.keys()), default=list(SECTOR_TOPICS.keys())[:4])
-    selected_people = st.sidebar.multiselect("Personas", options=list(PEOPLE.keys()), default=[])
-    selected_companies = st.sidebar.multiselect("Empresas", options=list(COMPANIES.keys()), default=["Andess", "Aguas Andinas"])
+    selected_categories = st.sidebar.multiselect("Categorías", options=list(sector_topics.keys()), default=list(sector_topics.keys())[:4])
+    selected_people = st.sidebar.multiselect("Personas", options=list(people.keys()), default=[])
+    company_defaults = [name for name in ["Andess", "Aguas Andinas"] if name in companies]
+    selected_companies = st.sidebar.multiselect("Empresas", options=list(companies.keys()), default=company_defaults)
     date_range = st.sidebar.date_input("Rango de fechas", value=(date.today() - timedelta(days=7), date.today()))
     limit = st.sidebar.slider("Límite de resultados", min_value=20, max_value=200, value=80, step=20)
     include_user_timelines = st.sidebar.toggle("Incluir timelines de usuarios monitoreados", value=False)

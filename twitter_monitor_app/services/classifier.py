@@ -2,32 +2,31 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from data.keywords import CHILE_CONTEXT_TERMS, COMPANIES, PEOPLE, RISK_TERMS, SECTOR_TOPICS
 from utils.text_utils import contains_any_term, find_matching_terms, looks_spanish, normalize_text
 
 
-def detect_chile_context(text: str) -> bool:
-    return contains_any_term(text, CHILE_CONTEXT_TERMS)
+def detect_chile_context(text: str, context_terms: List[str]) -> bool:
+    return contains_any_term(text, context_terms)
 
 
-def classify_tweet(tweet: Dict) -> Dict:
+def classify_tweet(tweet: Dict, catalog: dict) -> Dict:
     text = tweet.get("text", "")
     normalized = normalize_text(text)
     matches: List[Dict] = []
 
-    for category, terms in SECTOR_TOPICS.items():
+    for category, terms in catalog["sector_topics"].items():
         for term in find_matching_terms(normalized, terms):
             matches.append({"match_type": "category", "group": category, "term": term})
 
-    for company, aliases in COMPANIES.items():
+    for company, aliases in catalog["companies"].items():
         for term in find_matching_terms(normalized, aliases):
             matches.append({"match_type": "company", "group": company, "term": term})
 
-    for person, aliases in PEOPLE.items():
+    for person, aliases in catalog["people"].items():
         for term in find_matching_terms(normalized, aliases):
             matches.append({"match_type": "person", "group": person, "term": term})
 
-    risk_matches = find_matching_terms(normalized, RISK_TERMS)
+    risk_matches = find_matching_terms(normalized, catalog["risk_terms"])
     for term in risk_matches:
         matches.append({"match_type": "risk", "group": "Riesgo reputacional", "term": term})
 
@@ -37,7 +36,7 @@ def classify_tweet(tweet: Dict) -> Dict:
     return {
         "normalized_text": normalized,
         "is_spanish": looks_spanish(tweet),
-        "is_chile_context": detect_chile_context(normalized),
+        "is_chile_context": detect_chile_context(normalized, catalog["chile_context_terms"]),
         "matches": matches,
         "category_detected": category_detected,
         "matched_keyword": first_keyword,
@@ -45,7 +44,7 @@ def classify_tweet(tweet: Dict) -> Dict:
     }
 
 
-def post_process_tweets(tweets: List[Dict], strict_keyword_filter: bool = True) -> List[Dict]:
+def post_process_tweets(tweets: List[Dict], catalog: dict, strict_keyword_filter: bool = True) -> List[Dict]:
     processed = []
     seen_ids = set()
 
@@ -55,7 +54,7 @@ def post_process_tweets(tweets: List[Dict], strict_keyword_filter: bool = True) 
             continue
         seen_ids.add(tweet_id)
 
-        enriched = {**tweet, **classify_tweet(tweet)}
+        enriched = {**tweet, **classify_tweet(tweet, catalog)}
         if not enriched["is_spanish"]:
             continue
         if strict_keyword_filter and not enriched["matches"]:

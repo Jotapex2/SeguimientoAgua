@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List
 
-from data.keywords import COMPANIES, PEOPLE, SECTOR_TOPICS
 from utils.helpers import chunk_list
 
 
@@ -16,35 +15,46 @@ def build_simple_or_query(terms: Iterable[str], phrase_wrap: bool = True) -> str
     return " OR ".join(cleaned)
 
 
-def build_sector_batches(selected_categories: List[str], batch_size: int = 4) -> List[Dict[str, str]]:
+def build_sector_batches(selected_categories: List[str], sector_topics: Dict[str, List[str]], batch_size: int = 4) -> List[Dict[str, str]]:
     batches: List[Dict[str, str]] = []
     for category in selected_categories:
-        terms = SECTOR_TOPICS.get(category, [])
+        terms = sector_topics.get(category, [])
         for group in chunk_list(terms, batch_size):
             query = f"({build_simple_or_query(group)})"
             batches.append({"category": category, "query": query})
     return batches
 
 
-def build_entity_batches(selected_people: List[str], selected_companies: List[str], batch_size: int = 4) -> List[Dict[str, str]]:
+def build_entity_batches(
+    selected_people: List[str],
+    selected_companies: List[str],
+    people: Dict[str, List[str]],
+    companies: Dict[str, List[str]],
+    batch_size: int = 4,
+) -> List[Dict[str, str]]:
     batches: List[Dict[str, str]] = []
     for person in selected_people:
-        aliases = PEOPLE.get(person, [])
+        aliases = people.get(person, [])
         for group in chunk_list(aliases, batch_size):
             batches.append({"category": "Personas", "query": f"({build_simple_or_query(group)})", "entity": person})
 
     for company in selected_companies:
-        aliases = COMPANIES.get(company, [])
+        aliases = companies.get(company, [])
         for group in chunk_list(aliases, batch_size):
             batches.append({"category": "Empresas", "query": f"({build_simple_or_query(group)})", "entity": company})
     return batches
 
 
-def build_query_plan(selected_categories: List[str], selected_people: List[str], selected_companies: List[str]) -> List[Dict[str, str]]:
-    plan = build_sector_batches(selected_categories) + build_entity_batches(selected_people, selected_companies)
+def build_query_plan(selected_categories: List[str], selected_people: List[str], selected_companies: List[str], catalog: dict) -> List[Dict[str, str]]:
+    plan = build_sector_batches(selected_categories, catalog["sector_topics"]) + build_entity_batches(
+        selected_people,
+        selected_companies,
+        catalog["people"],
+        catalog["companies"],
+    )
     if not plan:
-        all_categories = list(SECTOR_TOPICS.keys())
-        plan = build_sector_batches(all_categories)
+        all_categories = list(catalog["sector_topics"].keys())
+        plan = build_sector_batches(all_categories, catalog["sector_topics"])
     return plan
 
 

@@ -1,3 +1,6 @@
+from copy import deepcopy
+
+
 SECTOR_TOPICS = {
     "Empresas sanitarias": [
         "andess",
@@ -7,6 +10,10 @@ SECTOR_TOPICS = {
         "nuevosur",
         "smapa",
         "aguas del valle",
+        "empresa sanitaria",
+        "empresas sanitarias",
+        "sector sanitario",
+        "industria sanitaria",
     ],
     "Regulación sanitaria": [
         "regulacion sanitaria",
@@ -16,6 +23,11 @@ SECTOR_TOPICS = {
         "norma sanitaria",
         "tarifas sanitarias",
         "concesion sanitaria",
+        "marco regulatorio",
+        "regulador",
+        "fiscalizacion",
+        "sancion",
+        "sanciones",
     ],
     "Industria hídrica": [
         "agua potable",
@@ -39,6 +51,16 @@ SECTOR_TOPICS = {
         "escasez hidrica",
         "racionamiento",
         "megasequia",
+    ],
+    "Liderazgo y stakeholders": [
+        "ministra de obras publicas",
+        "ministerio de obras publicas",
+        "mop",
+        "direccion general de aguas",
+        "dga",
+        "superintendencia de servicios sanitarios",
+        "siss",
+        "gobierno de chile",
     ],
     "Riesgo regulatorio": [
         "sanciones",
@@ -64,6 +86,9 @@ PEOPLE = {
     "Autoridades SISS": ["siss", "superintendencia de servicios sanitarios"],
     "Dirección General de Aguas": ["dga", "direccion general de aguas"],
     "Gobierno de Chile": ["gobierno de chile", "ministerio de obras publicas", "mop"],
+    "Andess": ["andess"],
+    "Senado Chile": ["senado", "senado chile"],
+    "Cámara de Diputadas y Diputados": ["camara de diputados", "camara de diputadas y diputados"],
 }
 
 PRIORITY_PEOPLE = {
@@ -101,4 +126,20 @@ MONITOR_USERS = [
     "andesschile",
     "aguas_andinas",
     "mop_chile",
+    "superdesal",
+    "gore_rm",
 ]
+
+
+def get_default_catalog() -> dict:
+    return deepcopy(
+        {
+            "sector_topics": SECTOR_TOPICS,
+            "companies": COMPANIES,
+            "people": PEOPLE,
+            "priority_people": sorted(PRIORITY_PEOPLE),
+            "risk_terms": RISK_TERMS,
+            "chile_context_terms": CHILE_CONTEXT_TERMS,
+            "monitor_users": MONITOR_USERS,
+        }
+    )
