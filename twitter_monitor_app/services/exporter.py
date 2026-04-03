@@ -5,6 +5,36 @@ from io import BytesIO
 import pandas as pd
 
 
+def _transform_excel_layout(df: pd.DataFrame) -> pd.DataFrame:
+    export_df = df.copy()
+    preferred_columns = [
+        "id",
+        "createdAt",
+        "author_name",
+        "author_username",
+        "post_url",
+        "category_detected",
+        "matched_keyword",
+        "text",
+        "relevance_score",
+        "risk_score",
+        "engagement_total",
+        "viewCount",
+        "likeCount",
+        "retweetCount",
+        "replyCount",
+        "quoteCount",
+        "query_category",
+        "query_batch",
+        "is_chile_origin",
+        "is_chile_context",
+        "risk_terms",
+        "matches",
+    ]
+    existing_columns = [column for column in preferred_columns if column in export_df.columns]
+    return export_df[existing_columns]
+
+
 def build_export_frame(df: pd.DataFrame) -> pd.DataFrame:
     export_df = df.copy()
     if "url" not in export_df.columns:
@@ -57,5 +87,5 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
 def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        build_export_frame(df).to_excel(writer, sheet_name="tweets", index=False)
+        _transform_excel_layout(build_export_frame(df)).to_excel(writer, sheet_name="tweets", index=False)
     return output.getvalue()
