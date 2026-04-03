@@ -12,8 +12,8 @@ class AppConfig:
     app_name: str = "Monitoreo Sectorial X/Twitter Chile"
     api_key: str = os.getenv("TWITTERAPI_IO_KEY", "")
     base_url: str = os.getenv("BASE_URL", "https://api.twitterapi.io")
-    default_limit: int = 80
-    max_limit: int = 200
+    default_limit: int = 10000
+    max_limit: int = 10000
     request_timeout: int = 30
     max_retries: int = 3
     backoff_factor: float = 1.5

@@ -4,7 +4,11 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from config.settings import get_settings
+
+
 def render_sidebar_filters(catalog: dict):
+    settings = get_settings()
     st.sidebar.header("Filtros")
     sector_topics = catalog["sector_topics"]
     people = catalog["people"]
@@ -15,8 +19,9 @@ def render_sidebar_filters(catalog: dict):
     company_defaults = [name for name in ["Andess", "Aguas Andinas"] if name in companies]
     selected_companies = st.sidebar.multiselect("Empresas", options=list(companies.keys()), default=company_defaults)
     date_range = st.sidebar.date_input("Rango de fechas", value=(date.today() - timedelta(days=7), date.today()))
-    limit = st.sidebar.slider("Límite de resultados", min_value=20, max_value=200, value=80, step=20)
+    limit = st.sidebar.slider("Límite de resultados", min_value=20, max_value=settings.max_limit, value=settings.default_limit, step=20)
     include_user_timelines = st.sidebar.toggle("Incluir timelines de usuarios monitoreados", value=False)
+    export_only_high_views = st.sidebar.toggle("Exportar sólo posts con viewCount > 1000", value=False)
     run = st.sidebar.button("Ejecutar monitoreo", use_container_width=True, type="primary")
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -33,5 +38,6 @@ def render_sidebar_filters(catalog: dict):
         "end_date": end_date,
         "limit": limit,
         "include_user_timelines": include_user_timelines,
+        "export_only_high_views": export_only_high_views,
         "run": run,
     }

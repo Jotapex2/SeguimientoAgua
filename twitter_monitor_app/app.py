@@ -153,6 +153,16 @@ def render_limitations(df: pd.DataFrame):
     st.info("\n".join(f"- {item}" for item in limitations))
 
 
+def build_export_dataframe(df: pd.DataFrame, export_only_high_views: bool) -> pd.DataFrame:
+    if df.empty:
+        return df
+    export_df = df.copy()
+    if export_only_high_views:
+        view_counts = pd.to_numeric(export_df.get("viewCount"), errors="coerce")
+        export_df = export_df.loc[view_counts > 1000].copy()
+    return export_df
+
+
 def main():
     settings = get_settings()
     st.set_page_config(page_title=settings.app_name, layout="wide")
@@ -192,16 +202,19 @@ def main():
     render_rankings(df)
 
     st.subheader("Exportación")
-    if not df.empty:
-        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(df), file_name="twitter_monitor_results.csv", mime="text/csv")
+    export_df = build_export_dataframe(df, filters["export_only_high_views"])
+    if filters["export_only_high_views"]:
+        st.caption(f"Exportación filtrada: {len(export_df)} posts con viewCount mayor a 1000.")
+    if not export_df.empty:
+        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(export_df), file_name="twitter_monitor_results.csv", mime="text/csv")
         st.download_button(
             "Descargar Excel",
-            data=dataframe_to_excel_bytes(df),
+            data=dataframe_to_excel_bytes(export_df),
             file_name="twitter_monitor_results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.caption("Sin datos exportables.")
+        st.caption("Sin datos exportables con el filtro actual.")
 
 
 if __name__ == "__main__":
