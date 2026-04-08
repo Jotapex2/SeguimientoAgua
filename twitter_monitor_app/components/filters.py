@@ -13,6 +13,8 @@ def render_sidebar_filters(catalog: dict):
     sector_topics = catalog["sector_topics"]
     people = catalog["people"]
     companies = catalog["companies"]
+    monitor_users = catalog["monitor_users"]
+
     simulation_mode = st.sidebar.toggle("Simulación sin API", value=True)
     selected_categories = st.sidebar.multiselect("Categorías", options=list(sector_topics.keys()), default=list(sector_topics.keys())[:4])
     selected_people = st.sidebar.multiselect("Personas", options=list(people.keys()), default=[])
@@ -25,6 +27,13 @@ def render_sidebar_filters(catalog: dict):
     cache_ttl_hours = st.sidebar.slider("TTL caché (horas)", min_value=1, max_value=48, value=settings.default_cache_ttl_hours, step=1)
     incremental_mode = st.sidebar.toggle("Modo incremental: traer sólo posts nuevos", value=True)
     include_user_timelines = st.sidebar.toggle("Incluir timelines de usuarios monitoreados", value=False)
+    selected_monitor_users = []
+    if include_user_timelines:
+        selected_monitor_users = st.sidebar.multiselect(
+            "Usuarios para timeline",
+            options=monitor_users,
+            default=monitor_users[:2],
+        )
     chile_only = st.sidebar.toggle("Sólo posts hechos desde Chile (CL)", value=False)
     export_only_high_views = st.sidebar.toggle("Exportar sólo posts con viewCount > 1000", value=False)
     run = st.sidebar.button("Ejecutar monitoreo", width="stretch", type="primary")
@@ -47,6 +56,7 @@ def render_sidebar_filters(catalog: dict):
         "cache_ttl_hours": cache_ttl_hours,
         "incremental_mode": incremental_mode,
         "include_user_timelines": include_user_timelines,
+        "selected_monitor_users": selected_monitor_users,
         "chile_only": chile_only,
         "export_only_high_views": export_only_high_views,
         "run": run,

@@ -52,9 +52,6 @@ def build_query_plan(selected_categories: List[str], selected_people: List[str],
         catalog["people"],
         catalog["companies"],
     )
-    if not plan:
-        all_categories = list(catalog["sector_topics"].keys())
-        plan = build_sector_batches(all_categories, catalog["sector_topics"])
     return plan
 
 
