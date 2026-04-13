@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from twitter_monitor_app.config.settings import get_settings
-from twitter_monitor_app.utils.helpers import ensure_utc_bounds
+from twitter_monitor_app.utils.helpers import ensure_utc_bounds, parse_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,14 @@ class TwitterClient:
             raise TwitterApiError(message)
         return payload
 
-    def _paginate(self, endpoint: str, params: Dict, result_key: str, max_results: int) -> List[Dict]:
+    def _paginate(
+        self, 
+        endpoint: str, 
+        params: Dict, 
+        result_key: str, 
+        max_results: int,
+        stop_condition: Callable[[List[Dict]], bool] | None = None
+    ) -> List[Dict]:
         results: List[Dict] = []
         cursor = ""
         empty_page_hits = 0
@@ -81,6 +88,10 @@ class TwitterClient:
                     break
             else:
                 results.extend(page_items)
+                
+            if stop_condition and stop_condition(page_items):
+                # Cut early to save API calls if we hit old tweets
+                break
 
             has_next = payload.get("has_next_page", False)
             next_cursor = payload.get("next_cursor") or ""
@@ -115,9 +126,31 @@ class TwitterClient:
             params["untilTime"] = end_ts
         return self._paginate("/twitter/tweet/advanced_search", params, "tweets", max_results=max_results)
 
-    def get_user_tweets(self, username: str, max_results: int = 40, include_replies: bool = False) -> List[Dict]:
+    def get_user_tweets(
+        self, 
+        username: str, 
+        max_results: int = 40, 
+        include_replies: bool = False,
+        since_time: int | None = None
+    ) -> List[Dict]:
         params = {
             "userName": username.lstrip("@"),
             "includeReplies": str(include_replies).lower(),
         }
-        return self._paginate("/twitter/user/last_tweets", params, "tweets", max_results=max_results)
+        
+        def stop_on_old_tweets(page_items: List[Dict]) -> bool:
+            if not since_time:
+                return False
+            for tweet in page_items:
+                created_at = parse_datetime(tweet.get("createdAt"))
+                if created_at and int(created_at.timestamp()) < since_time:
+                    return True
+            return False
+            
+        return self._paginate(
+            "/twitter/user/last_tweets", 
+            params, 
+            "tweets", 
+            max_results=max_results,
+            stop_condition=stop_on_old_tweets
+        )

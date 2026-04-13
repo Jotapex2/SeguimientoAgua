@@ -15,7 +15,7 @@ def build_simple_or_query(terms: Iterable[str], phrase_wrap: bool = True) -> str
     return " OR ".join(cleaned)
 
 
-def build_sector_batches(selected_categories: List[str], sector_topics: Dict[str, List[str]], batch_size: int = 4) -> List[Dict[str, str]]:
+def build_sector_batches(selected_categories: List[str], sector_topics: Dict[str, List[str]], batch_size: int = 15) -> List[Dict[str, str]]:
     batches: List[Dict[str, str]] = []
     for category in selected_categories:
         terms = sector_topics.get(category, [])
@@ -30,7 +30,7 @@ def build_entity_batches(
     selected_companies: List[str],
     people: Dict[str, List[str]],
     companies: Dict[str, List[str]],
-    batch_size: int = 4,
+    batch_size: int = 15,
 ) -> List[Dict[str, str]]:
     batches: List[Dict[str, str]] = []
     for person in selected_people:
