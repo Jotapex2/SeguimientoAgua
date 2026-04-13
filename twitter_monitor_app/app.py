@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 import pandas as pd
 import streamlit as st
@@ -20,6 +20,7 @@ from twitter_monitor_app.components.tables import render_rankings, render_result
 from twitter_monitor_app.components.taxonomy_editor import render_taxonomy_editor
 from twitter_monitor_app.config.settings import get_settings
 from twitter_monitor_app.data.keywords import get_default_catalog
+from twitter_monitor_app.google_social_monitor import collect_monitor_results
 from twitter_monitor_app.services.classifier import post_process_tweets
 from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
 from twitter_monitor_app.services.runtime_store import get_history_count, persist_history
@@ -28,6 +29,27 @@ from twitter_monitor_app.services.data_manager import mock_tweets, collect_api_d
 from twitter_monitor_app.services.twitter_client import TwitterApiError
 
 logging.basicConfig(level=logging.INFO)
+
+
+def build_google_keywords(filters: Dict, catalog: dict) -> List[str]:
+    keywords: list[str] = []
+
+    for category in filters["selected_categories"]:
+        keywords.extend(catalog["sector_topics"].get(category, []))
+    for person in filters["selected_people"]:
+        keywords.extend(catalog["people"].get(person, []))
+    for company in filters["selected_companies"]:
+        keywords.extend(catalog["companies"].get(company, []))
+
+    deduped_keywords: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        normalized = keyword.casefold().strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped_keywords.append(keyword.strip())
+    return deduped_keywords
 
 
 def build_dataframe(tweets: List[Dict], catalog: dict) -> pd.DataFrame:
@@ -73,6 +95,52 @@ def build_export_dataframe(df: pd.DataFrame, export_only_high_views: bool) -> pd
     return export_df
 
 
+def build_google_export_name(filters: Dict) -> str:
+    platform = "linkedin" if filters["search_platform"] == "LinkedIn" else "x"
+    mode = "google" if filters["x_search_mode"] == "Google" or platform == "linkedin" else "app"
+    return f"{platform}_{mode}_results"
+
+
+def format_google_mode(filters: Dict) -> str:
+    if filters["search_platform"] == "LinkedIn":
+        return "LinkedIn / Google"
+    if filters["x_search_mode"] == "Google":
+        return "X / Google"
+    return "X / App"
+
+
+def render_google_metrics(df: pd.DataFrame):
+    total = len(df)
+    unique_keywords = df["keyword"].nunique() if total and "keyword" in df.columns else 0
+    unique_links = df["link"].nunique() if total and "link" in df.columns else 0
+    avg_relevance = round(df["relevancia_score"].mean(), 1) if total and "relevancia_score" in df.columns else 0.0
+
+    cols = st.columns(4)
+    cols[0].metric("Resultados", total)
+    cols[1].metric("Keywords", unique_keywords)
+    cols[2].metric("Links únicos", unique_links)
+    cols[3].metric("Relevancia promedio", avg_relevance)
+
+
+def render_google_results(df: pd.DataFrame):
+    if df.empty:
+        st.warning("No se encontraron resultados para los filtros actuales.")
+        return
+    preview_columns = ["platform", "keyword", "titulo", "fecha", "descripcion", "link", "relevancia_score"]
+    st.dataframe(df[preview_columns], width="stretch", hide_index=True)
+
+
+def render_google_summary(filters: Dict, keywords: Iterable[str], df: pd.DataFrame):
+    keyword_count = len(list(keywords))
+    messages = [
+        f"Modo activo: {format_google_mode(filters)}.",
+        f"Keywords ejecutadas: {keyword_count}.",
+        f"Resultados procesados: {len(df)}.",
+        "La búsqueda Google usa indexación pública y no aplica los mismos filtros/metricas que X vía app.",
+    ]
+    st.caption(" ".join(messages))
+
+
 def render_efficiency_summary(filters: Dict, query_stats: Dict, df: pd.DataFrame):
     history_count = get_history_count()
     messages = [
@@ -97,65 +165,110 @@ def main():
     settings = get_settings()
     st.set_page_config(page_title=settings.app_name, layout="wide")
     st.title(settings.app_name)
-    st.caption("Monitoreo ejecutivo para conversaciones del sector sanitario, hídrico y regulatorio en Chile.")
+    st.caption("Monitoreo ejecutivo para conversaciones del sector sanitario, hídrico y regulatorio en Chile en X y LinkedIn.")
 
     default_catalog = get_default_catalog()
     if "catalog" not in st.session_state:
         st.session_state["catalog"] = get_default_catalog()
     catalog = render_taxonomy_editor(st.session_state["catalog"], default_catalog)
     filters = render_sidebar_filters(catalog)
+    is_x_app_mode = filters["search_platform"] == "X" and filters["x_search_mode"] == "App"
+
+    st.caption(f"Fuente seleccionada: {format_google_mode(filters)}.")
 
     if not filters["run"]:
-        st.info("Configura filtros y ejecuta el monitoreo. El modo simulación está habilitado por defecto para probar la UI sin consumir la API.")
+        st.info("Configura filtros y ejecuta el monitoreo. Puedes alternar entre LinkedIn/Google, X/App y X/Google desde la barra lateral.")
         return
 
-    with st.spinner("Consultando y procesando tweets..."):
+    if is_x_app_mode:
+        with st.spinner("Consultando y procesando resultados de X..."):
+            try:
+                if filters["simulation_mode"]:
+                    raw_tweets = mock_tweets()
+                    query_stats = {
+                        "api_calls_saved_by_cache": 0,
+                        "query_batches_planned": 0,
+                        "query_batches_executed": 0,
+                        "timeline_users_executed": 0,
+                        "effective_limit": filters["limit"],
+                        "stopped_early": False,
+                    }
+                else:
+                    raw_tweets, query_stats = collect_api_data(filters, catalog)
+            except TwitterApiError as exc:
+                st.error(str(exc))
+                return
+
+            processed = post_process_tweets(raw_tweets, catalog, chile_only=filters["chile_only"])
+            df = build_dataframe(processed, catalog)
+            persist_history(df.to_dict(orient="records"))
+
+        render_kpis(df)
+        render_limitations(df)
+        render_efficiency_summary(filters, query_stats, df)
+        if filters["chile_only"]:
+            st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
+
+        st.subheader("Resultados")
+        render_results_table(df)
+
+        st.subheader("Visualizaciones")
+        render_charts(df)
+
+        st.subheader("Rankings")
+        render_rankings(df)
+
+        st.subheader("Exportación")
+        export_df = build_export_dataframe(df, filters["export_only_high_views"])
+        if filters["export_only_high_views"]:
+            st.caption(f"Exportación filtrada: {len(export_df)} posts con viewCount mayor a 1000.")
+        if not export_df.empty:
+            st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(export_df), file_name="twitter_monitor_results.csv", mime="text/csv")
+            st.download_button(
+                "Descargar Excel",
+                data=dataframe_to_excel_bytes(export_df),
+                file_name="twitter_monitor_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            st.caption("Sin datos exportables con el filtro actual.")
+        return
+
+    google_platform = "linkedin" if filters["search_platform"] == "LinkedIn" else "x"
+    google_keywords = build_google_keywords(filters, catalog)
+    if not google_keywords:
+        st.error("Selecciona al menos una categoría, persona o empresa para buscar en Google.")
+        return
+
+    with st.spinner("Consultando resultados públicos vía Google..."):
         try:
-            if filters["simulation_mode"]:
-                raw_tweets = mock_tweets()
-                query_stats = {
-                    "api_calls_saved_by_cache": 0,
-                    "query_batches_planned": 0,
-                    "query_batches_executed": 0,
-                    "timeline_users_executed": 0,
-                    "effective_limit": filters["limit"],
-                    "stopped_early": False,
-                }
-            else:
-                raw_tweets, query_stats = collect_api_data(filters, catalog)
-        except TwitterApiError as exc:
+            df = collect_monitor_results(
+                keywords=google_keywords,
+                results_per_keyword=filters["google_results_per_keyword"],
+                language=filters["google_language"],
+                platform_name=google_platform,
+                lowercase_text=filters["google_lowercase_text"],
+                min_delay_seconds=filters["google_min_delay"],
+                max_delay_seconds=filters["google_max_delay"],
+            )
+        except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
             return
 
-        processed = post_process_tweets(raw_tweets, catalog, chile_only=filters["chile_only"])
-        df = build_dataframe(processed, catalog)
-        persist_history(df.to_dict(orient="records"))
-
-    render_kpis(df)
-    render_limitations(df)
-    render_efficiency_summary(filters, query_stats, df)
-    if filters["chile_only"]:
-        st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
+    render_google_metrics(df)
+    render_google_summary(filters, google_keywords, df)
 
     st.subheader("Resultados")
-    render_results_table(df)
-
-    st.subheader("Visualizaciones")
-    render_charts(df)
-
-    st.subheader("Rankings")
-    render_rankings(df)
+    render_google_results(df)
 
     st.subheader("Exportación")
-    export_df = build_export_dataframe(df, filters["export_only_high_views"])
-    if filters["export_only_high_views"]:
-        st.caption(f"Exportación filtrada: {len(export_df)} posts con viewCount mayor a 1000.")
-    if not export_df.empty:
-        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(export_df), file_name="twitter_monitor_results.csv", mime="text/csv")
+    export_name = build_google_export_name(filters)
+    if not df.empty:
+        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(df), file_name=f"{export_name}.csv", mime="text/csv")
         st.download_button(
             "Descargar Excel",
-            data=dataframe_to_excel_bytes(export_df),
-            file_name="twitter_monitor_results.xlsx",
+            data=dataframe_to_excel_bytes(df),
+            file_name=f"{export_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:

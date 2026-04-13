@@ -32,7 +32,10 @@ def _transform_excel_layout(df: pd.DataFrame) -> pd.DataFrame:
         "matches",
     ]
     existing_columns = [column for column in preferred_columns if column in export_df.columns]
-    return export_df[existing_columns]
+    if not existing_columns:
+        return export_df
+    remaining_columns = [column for column in export_df.columns if column not in existing_columns]
+    return export_df[existing_columns + remaining_columns]
 
 
 def build_export_frame(df: pd.DataFrame) -> pd.DataFrame:

@@ -260,13 +260,12 @@ def print_console_summary(df: pd.DataFrame) -> None:
         print(f"{row.titulo} — {row.keyword} — {row.link}")
 
 
-def run_monitor(
+def collect_monitor_results(
     keywords: list[str],
     results_per_keyword: int,
     language: str,
     platform_name: str,
     lowercase_text: bool,
-    export_excel: bool,
     min_delay_seconds: float,
     max_delay_seconds: float,
 ) -> pd.DataFrame:
@@ -294,7 +293,29 @@ def run_monitor(
         logger.info("Sleep %.2fs antes de la siguiente keyword.", sleep_seconds)
         time.sleep(sleep_seconds)
 
-    cleaned_df = clean_results(all_results, platform=platform, lowercase_text=lowercase_text)
+    return clean_results(all_results, platform=platform, lowercase_text=lowercase_text)
+
+
+def run_monitor(
+    keywords: list[str],
+    results_per_keyword: int,
+    language: str,
+    platform_name: str,
+    lowercase_text: bool,
+    export_excel: bool,
+    min_delay_seconds: float,
+    max_delay_seconds: float,
+) -> pd.DataFrame:
+    platform = PLATFORM_CONFIG[platform_name]
+    cleaned_df = collect_monitor_results(
+        keywords=keywords,
+        results_per_keyword=results_per_keyword,
+        language=language,
+        platform_name=platform_name,
+        lowercase_text=lowercase_text,
+        min_delay_seconds=min_delay_seconds,
+        max_delay_seconds=max_delay_seconds,
+    )
     csv_path = Path(platform.default_output_csv)
     excel_path = Path(platform.default_output_excel) if export_excel else None
     export_results(cleaned_df, csv_path=csv_path, excel_path=excel_path)
