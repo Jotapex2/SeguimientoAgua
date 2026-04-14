@@ -43,8 +43,14 @@ class PlatformConfig:
 PLATFORM_CONFIG = {
     "linkedin": PlatformConfig(
         name="linkedin",
-        search_site="site:linkedin.com/posts",
-        allowed_url_fragments=("linkedin.com/posts",),
+        search_site="site:linkedin.com",
+        allowed_url_fragments=(
+            "linkedin.com/posts",
+            "linkedin.com/feed/update",
+            "linkedin.com/pulse",
+            "linkedin.com/company/",
+            "linkedin.com/in/",
+        ),
         default_output_csv="linkedin_scraping_results.csv",
         default_output_excel="linkedin_scraping_results.xlsx",
     ),
@@ -104,6 +110,11 @@ def build_session(timeout: int = 20) -> Session:
 
 
 def build_google_query(keyword: str, platform: PlatformConfig) -> str:
+    if platform.name == "linkedin":
+        return (
+            f'{platform.search_site} "{keyword}" '
+            '("linkedin.com/posts" OR "linkedin.com/feed/update" OR "linkedin.com/pulse")'
+        )
     return f'{platform.search_site} "{keyword}"'
 
 
@@ -114,6 +125,10 @@ def extract_google_result_url(raw_href: str) -> str:
         parsed = urlparse(raw_href)
         query = parse_qs(parsed.query)
         return unquote(query.get("q", [""])[0])
+    if raw_href.startswith("http"):
+        parsed = urlparse(raw_href)
+        cleaned = parsed._replace(query="", fragment="")
+        return cleaned.geturl().rstrip("/")
     return raw_href
 
 
@@ -121,7 +136,77 @@ def is_allowed_result(url: str, platform: PlatformConfig) -> bool:
     normalized_url = (url or "").lower()
     if not normalized_url.startswith("http"):
         return False
-    return any(fragment in normalized_url for fragment in platform.allowed_url_fragments)
+    if not any(fragment in normalized_url for fragment in platform.allowed_url_fragments):
+        return False
+    if platform.name == "linkedin":
+        if not any(
+            marker in normalized_url
+            for marker in (
+                "/posts/",
+                "/feed/update/",
+                "/pulse/",
+                "/posts-",
+            )
+        ):
+            return False
+        return not any(
+            blocked in normalized_url
+            for blocked in (
+                "/jobs/",
+                "/learning/",
+                "/company-analytics/",
+                "/school/",
+                "/groups/",
+                "/events/",
+            )
+        )
+    return True
+
+
+def iter_result_blocks(soup: BeautifulSoup) -> list:
+    selectors = (
+        "div.g",
+        "div.MjjYud",
+        "div.Gx5Zad",
+        "div.tF2Cxc",
+    )
+    blocks: list = []
+    seen_nodes: set[int] = set()
+    for selector in selectors:
+        for node in soup.select(selector):
+            marker = id(node)
+            if marker in seen_nodes:
+                continue
+            seen_nodes.add(marker)
+            blocks.append(node)
+    return blocks
+
+
+def extract_result_title(result_block) -> str:
+    title_tag = result_block.select_one("h3")
+    if title_tag:
+        return " ".join(title_tag.get_text(" ", strip=True).split())
+    aria_title_tag = result_block.select_one("a[aria-label]")
+    if aria_title_tag:
+        return " ".join(aria_title_tag.get("aria-label", "").split())
+    return ""
+
+
+def extract_result_snippet(result_block) -> str:
+    snippet_tag = result_block.select_one(
+        "div.VwiC3b, div.yXK7lf, span.aCOpRe, div.s3v9rd, "
+        "div[data-sncf='1'], div.ITZIwc, div.kb0PBd, div.gxMdVd"
+    )
+    if snippet_tag:
+        return " ".join(snippet_tag.get_text(" ", strip=True).split())
+    text_fragments = [
+        fragment.strip()
+        for fragment in result_block.stripped_strings
+        if fragment.strip()
+    ]
+    if len(text_fragments) <= 1:
+        return ""
+    return " ".join(text_fragments[1:4])
 
 
 def extract_result_date(snippet: str) -> str:
@@ -164,7 +249,7 @@ def fetch_google_page(session: Session, query: str, start: int, language: str) -
 
 
 def clamp_results_per_keyword(results_per_keyword: int) -> int:
-    return max(10, min(results_per_keyword, MAX_GOOGLE_PAGES_PER_KEYWORD * 10))
+    return max(1, min(results_per_keyword, MAX_GOOGLE_PAGES_PER_KEYWORD * 10))
 
 
 def compute_backoff_seconds(
@@ -182,21 +267,22 @@ def compute_backoff_seconds(
 def parse_google_results(html: str, keyword: str, platform: PlatformConfig) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     parsed_results: list[dict] = []
+    seen_links: set[str] = set()
 
-    for result_block in soup.select("div.g"):
+    for result_block in iter_result_blocks(soup):
         link_tag = result_block.select_one("a[href]")
-        title_tag = result_block.select_one("h3")
-        snippet_tag = result_block.select_one("div.VwiC3b, div.yXK7lf, span.aCOpRe, div.s3v9rd")
-
-        if not link_tag or not title_tag:
+        if not link_tag:
             continue
 
         link = extract_google_result_url(link_tag.get("href", ""))
-        if not is_allowed_result(link, platform):
+        title = extract_result_title(result_block)
+        if not title:
+            continue
+        if not is_allowed_result(link, platform) or link in seen_links:
             continue
 
-        title = " ".join(title_tag.get_text(" ", strip=True).split())
-        snippet = " ".join((snippet_tag.get_text(" ", strip=True) if snippet_tag else "").split())
+        snippet = extract_result_snippet(result_block)
+        seen_links.add(link)
         parsed_results.append(
             {
                 "platform": platform.name,
@@ -225,15 +311,18 @@ def search_keyword(
     collected: list[dict] = []
     seen_links: set[str] = set()
     effective_results_per_keyword = clamp_results_per_keyword(results_per_keyword)
+    planned_pages = max(1, (effective_results_per_keyword + 9) // 10)
     max_rate_limit_retries = 2
 
-    for start in range(0, effective_results_per_keyword, 10):
+    for start in range(0, planned_pages * 10, 10):
         response: Response | None = None
         for attempt in range(1, max_rate_limit_retries + 2):
             try:
                 response = fetch_google_page(session, query=query, start=start, language=language)
                 break
             except GoogleRateLimitError as exc:
+                if start == 0:
+                    raise GoogleRateLimitError(start=start, retry_after=exc.retry_after) from exc
                 if attempt > max_rate_limit_retries:
                     raise GoogleRateLimitError(start=start, retry_after=exc.retry_after) from exc
                 sleep_seconds = compute_backoff_seconds(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import smtplib
 from email.message import EmailMessage
 
-from twitter_monitor_app.config.settings import get_settings
+from config.settings import get_settings
 
 
 class EmailDeliveryError(RuntimeError):

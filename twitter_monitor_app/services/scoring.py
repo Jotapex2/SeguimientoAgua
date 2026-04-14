@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, Iterable
 
-from twitter_monitor_app.utils.helpers import parse_datetime
+from utils.helpers import parse_datetime
 
 
 def compute_relevance_score(tweet: Dict, priority_people: Iterable[str]) -> float:

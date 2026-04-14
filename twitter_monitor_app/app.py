@@ -9,25 +9,56 @@ import pandas as pd
 import streamlit as st
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = PACKAGE_ROOT.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+PACKAGE_PARENT = PACKAGE_ROOT.parent
 
-from twitter_monitor_app.components.charts import render_charts
-from twitter_monitor_app.components.filters import render_sidebar_filters
-from twitter_monitor_app.components.metrics import render_kpis
-from twitter_monitor_app.components.tables import render_rankings, render_results_table
-from twitter_monitor_app.components.taxonomy_editor import render_taxonomy_editor
-from twitter_monitor_app.config.settings import get_settings
-from twitter_monitor_app.data.keywords import get_default_catalog
-from twitter_monitor_app.google_social_monitor import GoogleRateLimitError, MAX_GOOGLE_PAGES_PER_KEYWORD, collect_monitor_results
-from twitter_monitor_app.services.classifier import post_process_tweets
-from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
-from twitter_monitor_app.services.email_sender import EmailDeliveryError, is_email_delivery_configured, send_report_email
-from twitter_monitor_app.services.runtime_store import get_history_count, persist_history
-from twitter_monitor_app.services.scoring import enrich_scores
-from twitter_monitor_app.services.data_manager import mock_tweets, collect_api_data
-from twitter_monitor_app.services.twitter_client import TwitterApiError
+# Support both `streamlit run app.py` and package-style execution in Streamlit Cloud
+# without importing the same module tree under two different names.
+if __package__:
+    if str(PACKAGE_PARENT) not in sys.path:
+        sys.path.insert(0, str(PACKAGE_PARENT))
+
+    from twitter_monitor_app.components.charts import render_charts
+    from twitter_monitor_app.components.filters import render_sidebar_filters
+    from twitter_monitor_app.components.metrics import render_kpis
+    from twitter_monitor_app.components.tables import render_rankings, render_results_table
+    from twitter_monitor_app.components.taxonomy_editor import render_taxonomy_editor
+    from twitter_monitor_app.config.settings import get_settings
+    from twitter_monitor_app.data.keywords import get_default_catalog
+    from twitter_monitor_app.google_social_monitor import (
+        GoogleRateLimitError,
+        MAX_GOOGLE_PAGES_PER_KEYWORD,
+        collect_monitor_results,
+    )
+    from twitter_monitor_app.services.classifier import post_process_tweets
+    from twitter_monitor_app.services.data_manager import collect_api_data, mock_tweets
+    from twitter_monitor_app.services.email_sender import (
+        EmailDeliveryError,
+        is_email_delivery_configured,
+        send_report_email,
+    )
+    from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
+    from twitter_monitor_app.services.runtime_store import get_history_count, persist_history
+    from twitter_monitor_app.services.scoring import enrich_scores
+    from twitter_monitor_app.services.twitter_client import TwitterApiError
+else:
+    if str(PACKAGE_ROOT) not in sys.path:
+        sys.path.insert(0, str(PACKAGE_ROOT))
+
+    from components.charts import render_charts
+    from components.filters import render_sidebar_filters
+    from components.metrics import render_kpis
+    from components.tables import render_rankings, render_results_table
+    from components.taxonomy_editor import render_taxonomy_editor
+    from config.settings import get_settings
+    from data.keywords import get_default_catalog
+    from google_social_monitor import GoogleRateLimitError, MAX_GOOGLE_PAGES_PER_KEYWORD, collect_monitor_results
+    from services.classifier import post_process_tweets
+    from services.data_manager import collect_api_data, mock_tweets
+    from services.email_sender import EmailDeliveryError, is_email_delivery_configured, send_report_email
+    from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
+    from services.runtime_store import get_history_count, persist_history
+    from services.scoring import enrich_scores
+    from services.twitter_client import TwitterApiError
 
 logging.basicConfig(level=logging.INFO)
 
