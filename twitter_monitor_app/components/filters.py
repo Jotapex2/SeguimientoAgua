@@ -52,11 +52,11 @@ def render_sidebar_filters(catalog: dict):
     selected_monitor_users = []
     chile_only = False
     export_only_high_views = False
-    google_results_per_keyword = 10
+    google_results_per_keyword = settings.default_google_results_per_keyword
     google_language = "es"
     google_lowercase_text = False
-    google_min_delay = 2.0
-    google_max_delay = 4.0
+    google_min_delay = 4.0
+    google_max_delay = 8.0
 
     if is_x_app_mode:
         simulation_mode = st.sidebar.toggle("Simulación sin API", value=True)
@@ -78,12 +78,13 @@ def render_sidebar_filters(catalog: dict):
         google_results_per_keyword = st.sidebar.slider(
             "Resultados Google por keyword",
             min_value=5,
-            max_value=50,
-            value=10,
+            max_value=settings.max_google_results_per_keyword,
+            value=settings.default_google_results_per_keyword,
             step=5,
         )
         google_language = st.sidebar.selectbox("Idioma Google", options=["es", "en"], index=0)
         google_lowercase_text = st.sidebar.toggle("Normalizar texto a minúsculas", value=False)
+        st.sidebar.caption("Google puede bloquear consultas intensivas. Aunque el selector permita más, la app aplica un tope efectivo por keyword para reducir HTTP 429.")
 
     run = st.sidebar.button("Ejecutar monitoreo", width="stretch", type="primary")
 

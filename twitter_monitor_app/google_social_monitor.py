@@ -22,6 +22,8 @@ logger = logging.getLogger("google_social_monitor")
 
 GOOGLE_SEARCH_URL = "https://www.google.com/search"
 DEFAULT_KEYWORDS = ["Andess", "agua potable", "APR", "servicios sanitarios", "Aguas Andinas"]
+MAX_GOOGLE_PAGES_PER_KEYWORD = 20
+DEFAULT_GOOGLE_BACKOFF_SECONDS = 30.0
 DATE_PATTERN = re.compile(
     r"\b(?:\d{1,2}\s+de\s+[a-záéíóúñ]+(?:\s+de\s+\d{4})?|\d{1,2}/\d{1,2}/\d{2,4}|"
     r"(?:ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\.?\s+\d{1,2},?\s+\d{4})\b",
@@ -58,6 +60,16 @@ PLATFORM_CONFIG = {
 
 class GoogleSearchError(RuntimeError):
     pass
+
+
+class GoogleRateLimitError(GoogleSearchError):
+    def __init__(self, start: int, retry_after: float | None = None):
+        message = f"Google devolvió HTTP 429 para start={start}."
+        if retry_after is not None:
+            message += f" Reintenta en aproximadamente {int(retry_after)} segundos."
+        super().__init__(message)
+        self.start = start
+        self.retry_after = retry_after
 
 
 def build_session(timeout: int = 20) -> Session:
@@ -140,9 +152,31 @@ def fetch_google_page(session: Session, query: str, start: int, language: str) -
         "safe": "off",
     }
     response = session.get(GOOGLE_SEARCH_URL, params=params, timeout=session.request_timeout)
+    if response.status_code == 429:
+        retry_after_header = response.headers.get("Retry-After", "").strip()
+        retry_after: float | None = None
+        if retry_after_header.isdigit():
+            retry_after = float(retry_after_header)
+        raise GoogleRateLimitError(start=start, retry_after=retry_after)
     if response.status_code >= 400:
         raise GoogleSearchError(f"Google devolvió HTTP {response.status_code} para start={start}.")
     return response
+
+
+def clamp_results_per_keyword(results_per_keyword: int) -> int:
+    return max(10, min(results_per_keyword, MAX_GOOGLE_PAGES_PER_KEYWORD * 10))
+
+
+def compute_backoff_seconds(
+    min_delay_seconds: float,
+    max_delay_seconds: float,
+    attempt: int,
+    retry_after: float | None = None,
+) -> float:
+    if retry_after is not None and retry_after > 0:
+        return retry_after
+    base_delay = max(max_delay_seconds, min_delay_seconds, DEFAULT_GOOGLE_BACKOFF_SECONDS)
+    return min(base_delay * (2 ** max(attempt - 1, 0)), 300.0)
 
 
 def parse_google_results(html: str, keyword: str, platform: PlatformConfig) -> list[dict]:
@@ -190,12 +224,38 @@ def search_keyword(
     query = build_google_query(keyword, platform)
     collected: list[dict] = []
     seen_links: set[str] = set()
+    effective_results_per_keyword = clamp_results_per_keyword(results_per_keyword)
+    max_rate_limit_retries = 2
 
-    for start in range(0, max(results_per_keyword, 10), 10):
-        try:
-            response = fetch_google_page(session, query=query, start=start, language=language)
-        except requests.RequestException as exc:
-            raise GoogleSearchError(f"Fallo de red consultando Google para '{keyword}': {exc}") from exc
+    for start in range(0, effective_results_per_keyword, 10):
+        response: Response | None = None
+        for attempt in range(1, max_rate_limit_retries + 2):
+            try:
+                response = fetch_google_page(session, query=query, start=start, language=language)
+                break
+            except GoogleRateLimitError as exc:
+                if attempt > max_rate_limit_retries:
+                    raise GoogleRateLimitError(start=start, retry_after=exc.retry_after) from exc
+                sleep_seconds = compute_backoff_seconds(
+                    min_delay_seconds=min_delay_seconds,
+                    max_delay_seconds=max_delay_seconds,
+                    attempt=attempt,
+                    retry_after=exc.retry_after,
+                )
+                logger.warning(
+                    "HTTP 429 para '%s' en start=%s. Reintentando en %.2fs (intento %s/%s).",
+                    keyword,
+                    start,
+                    sleep_seconds,
+                    attempt,
+                    max_rate_limit_retries + 1,
+                )
+                time.sleep(sleep_seconds)
+            except requests.RequestException as exc:
+                raise GoogleSearchError(f"Fallo de red consultando Google para '{keyword}': {exc}") from exc
+
+        if response is None:
+            break
 
         page_results = parse_google_results(response.text, keyword=keyword, platform=platform)
         if not page_results:
@@ -209,17 +269,17 @@ def search_keyword(
             collected.append(item)
             seen_links.add(item["link"])
             new_results += 1
-            if len(collected) >= results_per_keyword:
+            if len(collected) >= effective_results_per_keyword:
                 break
 
-        if len(collected) >= results_per_keyword or new_results == 0:
+        if len(collected) >= effective_results_per_keyword or new_results == 0:
             break
 
         sleep_seconds = random.uniform(min_delay_seconds, max_delay_seconds)
         logger.info("Sleep %.2fs antes de la siguiente página para '%s'.", sleep_seconds, keyword)
         time.sleep(sleep_seconds)
 
-    return collected[:results_per_keyword]
+    return collected[:effective_results_per_keyword]
 
 
 def clean_results(results: Iterable[dict], platform: PlatformConfig, lowercase_text: bool = False) -> pd.DataFrame:
@@ -272,6 +332,14 @@ def collect_monitor_results(
     platform = PLATFORM_CONFIG[platform_name]
     session = build_session()
     all_results: list[dict] = []
+    effective_results_per_keyword = clamp_results_per_keyword(results_per_keyword)
+
+    if effective_results_per_keyword != results_per_keyword:
+        logger.warning(
+            "Se ajustó results_per_keyword de %s a %s para reducir riesgo de bloqueo.",
+            results_per_keyword,
+            effective_results_per_keyword,
+        )
 
     for keyword in keywords:
         keyword = keyword.strip()
@@ -281,7 +349,7 @@ def collect_monitor_results(
         keyword_results = search_keyword(
             session=session,
             keyword=keyword,
-            results_per_keyword=results_per_keyword,
+            results_per_keyword=effective_results_per_keyword,
             language=language,
             platform=platform,
             min_delay_seconds=min_delay_seconds,

@@ -20,9 +20,10 @@ from twitter_monitor_app.components.tables import render_rankings, render_result
 from twitter_monitor_app.components.taxonomy_editor import render_taxonomy_editor
 from twitter_monitor_app.config.settings import get_settings
 from twitter_monitor_app.data.keywords import get_default_catalog
-from twitter_monitor_app.google_social_monitor import collect_monitor_results
+from twitter_monitor_app.google_social_monitor import GoogleRateLimitError, MAX_GOOGLE_PAGES_PER_KEYWORD, collect_monitor_results
 from twitter_monitor_app.services.classifier import post_process_tweets
 from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
+from twitter_monitor_app.services.email_sender import EmailDeliveryError, is_email_delivery_configured, send_report_email
 from twitter_monitor_app.services.runtime_store import get_history_count, persist_history
 from twitter_monitor_app.services.scoring import enrich_scores
 from twitter_monitor_app.services.data_manager import mock_tweets, collect_api_data
@@ -101,6 +102,66 @@ def build_google_export_name(filters: Dict) -> str:
     return f"{platform}_{mode}_results"
 
 
+def build_report_mail_subject(filters: Dict) -> str:
+    return (
+        f"Informe {format_google_mode(filters)} "
+        f"{filters['start_date'].isoformat()} a {filters['end_date'].isoformat()}"
+    )
+
+
+def build_report_mail_body(filters: Dict, export_df: pd.DataFrame) -> str:
+    selected_groups = [
+        f"Categorías: {', '.join(filters['selected_categories']) or 'sin selección'}",
+        f"Personas: {', '.join(filters['selected_people']) or 'sin selección'}",
+        f"Empresas: {', '.join(filters['selected_companies']) or 'sin selección'}",
+    ]
+    summary_lines = [
+        "Adjunto informe generado desde Twitter Monitor App.",
+        f"Fuente: {format_google_mode(filters)}",
+        f"Rango de fechas: {filters['start_date'].isoformat()} a {filters['end_date'].isoformat()}",
+        f"Total de registros exportados: {len(export_df)}",
+        *selected_groups,
+    ]
+    return "\n".join(summary_lines)
+
+
+def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_name: str):
+    st.markdown("#### Enviar por correo")
+    if export_df.empty:
+        st.caption("No hay datos para adjuntar en el informe.")
+        return
+
+    if not is_email_delivery_configured():
+        st.warning("Falta configuración SMTP en `.env`. Define `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` y `EMAIL_FROM`.")
+        return
+
+    with st.form(f"email-report-form-{export_name}"):
+        recipients_raw = st.text_input("Destinatarios", placeholder="persona@empresa.cl, equipo@empresa.cl")
+        subject = st.text_input("Asunto", value=build_report_mail_subject(filters))
+        send_clicked = st.form_submit_button("Enviar informe")
+
+    if not send_clicked:
+        return
+
+    recipients = [item.strip() for item in recipients_raw.split(",") if item.strip()]
+    attachment_name = f"{export_name}.xlsx"
+    attachment_bytes = dataframe_to_excel_bytes(export_df)
+
+    try:
+        send_report_email(
+            recipients=recipients,
+            subject=subject.strip() or build_report_mail_subject(filters),
+            body=build_report_mail_body(filters, export_df),
+            attachment_name=attachment_name,
+            attachment_bytes=attachment_bytes,
+        )
+    except EmailDeliveryError as exc:
+        st.error(str(exc))
+        return
+
+    st.success(f"Informe enviado a: {', '.join(recipients)}")
+
+
 def format_google_mode(filters: Dict) -> str:
     if filters["search_platform"] == "LinkedIn":
         return "LinkedIn / Google"
@@ -132,10 +193,12 @@ def render_google_results(df: pd.DataFrame):
 
 def render_google_summary(filters: Dict, keywords: Iterable[str], df: pd.DataFrame):
     keyword_count = len(list(keywords))
+    effective_google_limit = min(filters["google_results_per_keyword"], MAX_GOOGLE_PAGES_PER_KEYWORD * 10)
     messages = [
         f"Modo activo: {format_google_mode(filters)}.",
         f"Keywords ejecutadas: {keyword_count}.",
         f"Resultados procesados: {len(df)}.",
+        f"Límite efectivo Google por keyword: {effective_google_limit}.",
         "La búsqueda Google usa indexación pública y no aplica los mismos filtros/metricas que X vía app.",
     ]
     st.caption(" ".join(messages))
@@ -230,6 +293,7 @@ def main():
                 file_name="twitter_monitor_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+            render_email_report_section(filters, export_df, "twitter_monitor_results")
         else:
             st.caption("Sin datos exportables con el filtro actual.")
         return
@@ -251,6 +315,13 @@ def main():
                 min_delay_seconds=filters["google_min_delay"],
                 max_delay_seconds=filters["google_max_delay"],
             )
+        except GoogleRateLimitError as exc:
+            st.error(
+                "Google bloqueó temporalmente la consulta por exceso de requests. "
+                "Baja el límite por keyword, usa menos keywords o espera antes de reintentar. "
+                f"Detalle: {exc}"
+            )
+            return
         except Exception as exc:  # noqa: BLE001
             st.error(str(exc))
             return
@@ -271,6 +342,7 @@ def main():
             file_name=f"{export_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        render_email_report_section(filters, df, export_name)
     else:
         st.caption("Sin datos exportables con el filtro actual.")
 

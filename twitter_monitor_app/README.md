@@ -18,6 +18,7 @@ La integración está basada en `twitterapi.io`, no en la API oficial de X/Twitt
 - Scoring de relevancia y riesgo reputacional.
 - Dashboard ejecutivo con KPIs, rankings y gráficos.
 - Exportación a CSV y Excel.
+- Envío de informe por correo con adjunto Excel vía SMTP.
 - Modo simulación sin API para probar la UI.
 - Caché local en disco para evitar consultas repetidas.
 - Modo incremental para traer sólo posts nuevos por query.
@@ -74,7 +75,15 @@ Completa:
 ```env
 TWITTERAPI_IO_KEY=your_api_key_here
 BASE_URL=https://api.twitterapi.io
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario@example.com
+SMTP_PASSWORD=your_smtp_password
+SMTP_USE_TLS=true
+EMAIL_FROM=usuario@example.com
 ```
+
+El envío de correo usa SMTP y adjunta el informe en formato Excel desde la sección de exportación.
 
 ## Instalación
 
