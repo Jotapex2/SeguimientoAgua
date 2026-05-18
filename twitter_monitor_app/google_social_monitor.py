@@ -308,7 +308,30 @@ def search_keywords_batch(session: Session, keywords: list[str], results_per_bat
     return collected
 
 
-def collect_monitor_results(keywords: list[str], results_per_kw: int, language: str, platform_name: str, lowercase: bool, min_delay: float, max_delay: float) -> pd.DataFrame:
+def collect_monitor_results(
+    keywords: list[str],
+    results_per_keyword: int | None = None,
+    language: str = "es",
+    platform_name: str = "linkedin",
+    lowercase_text: bool = False,
+    min_delay_seconds: float = 2.0,
+    max_delay_seconds: float = 4.0,
+    *,
+    results_per_kw: int | None = None,
+    lowercase: bool | None = None,
+    min_delay: float | None = None,
+    max_delay: float | None = None,
+) -> pd.DataFrame:
+    if results_per_kw is not None:
+        results_per_keyword = results_per_kw
+    if lowercase is not None:
+        lowercase_text = lowercase
+    if min_delay is not None:
+        min_delay_seconds = min_delay
+    if max_delay is not None:
+        max_delay_seconds = max_delay
+
+    results_per_keyword = results_per_keyword or 20
     platform = PLATFORM_CONFIG[platform_name]
     session = build_session()
     all_results: list[dict] = []
@@ -316,20 +339,20 @@ def collect_monitor_results(keywords: list[str], results_per_kw: int, language: 
     if not clean_kw: return pd.DataFrame()
 
     batches = list(chunk_list(clean_kw, GOOGLE_KEYWORDS_BATCH_SIZE))
-    results_per_batch = max(results_per_kw, 30)
+    results_per_batch = max(results_per_keyword, 30)
 
     for i, batch in enumerate(batches, 1):
         logger.info("Procesando lote %d/%d: %s", i, len(batches), batch)
-        batch_results = search_keywords_batch(session, batch, results_per_batch, language, platform, min_delay, max_delay)
+        batch_results = search_keywords_batch(session, batch, results_per_batch, language, platform, min_delay_seconds, max_delay_seconds)
         all_results.extend(batch_results)
         if i < len(batches) and not os.environ.get("SERPER_API_KEY"):
-            time.sleep(random.uniform(min_delay * 2, max_delay * 2))
+            time.sleep(random.uniform(min_delay_seconds * 2, max_delay_seconds * 2))
 
     df = pd.DataFrame(all_results)
     if df.empty: return pd.DataFrame(columns=["platform", "keyword", "titulo", "descripcion", "link", "fecha", "relevancia_score", "execution_timestamp"])
     
     df = df.drop_duplicates(subset=["keyword", "link"]).copy()
-    if lowercase:
+    if lowercase_text:
         for col in ("titulo", "descripcion"): df[col] = df[col].fillna("").str.lower()
     df["execution_timestamp"] = datetime.now(timezone.utc).isoformat()
     return df.sort_values(by=["keyword", "relevancia_score", "titulo"], ascending=[True, False, True]).reset_index(drop=True)
