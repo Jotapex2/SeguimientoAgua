@@ -20,8 +20,9 @@ Se simplificó el catálogo base definido en [data/keywords.py](F:\SeguimientoAg
 La lista priorizada actual quedó acotada a:
 
 - José Antonio Kast
-- Martín Arrau
 - Iván Poduje
+- Louis de Grange
+- Nicolás Balmaceda
 - Jorge Quiroz
 - Joaquín Daga
 
@@ -75,8 +76,9 @@ Se mantienen empresas sanitarias y actores directamente relacionados:
 El bloque `PEOPLE` quedó acotado a:
 
 - Presidente José Antonio Kast
-- Ministro Martín Arrau
 - Iván Poduje
+- Louis de Grange
+- Nicolás Balmaceda
 - Jorge Quiroz
 - Joaquín Daga
 

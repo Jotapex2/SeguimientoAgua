@@ -19,7 +19,7 @@ La integración está basada en `twitterapi.io`, no en la API oficial de X/Twitt
 - Dashboard ejecutivo con KPIs, rankings y gráficos.
 - Exportación a CSV y Excel.
 - Envío de informe por correo con adjunto Excel vía SMTP.
-- Análisis ejecutivo con DeepSeek Chat en tres secciones: industria sanitaria, ministro Iván Poduje y ministro Martín Arrau.
+- Análisis ejecutivo con DeepSeek Chat en cuatro secciones: industria sanitaria, ministro Iván Poduje, Louis de Grange y Nicolás Balmaceda.
 - Modo simulación sin API para probar la UI.
 - Caché local en disco para evitar consultas repetidas.
 - Modo incremental para traer sólo posts nuevos por query.

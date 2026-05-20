@@ -34,6 +34,7 @@ def render_sidebar_filters(catalog: dict):
     people = catalog["people"]
     companies = catalog["companies"]
     monitor_users = catalog["monitor_users"]
+    monitor_accounts = catalog.get("monitor_accounts", {})
 
     selected_categories = st.sidebar.multiselect("Categorías", options=list(sector_topics.keys()), default=list(sector_topics.keys())[:4])
     selected_people = st.sidebar.multiselect("Personas", options=list(people.keys()), default=[])
@@ -71,6 +72,7 @@ def render_sidebar_filters(catalog: dict):
                 "Usuarios para timeline",
                 options=monitor_users,
                 default=monitor_users[:2],
+                format_func=lambda username: f"{monitor_accounts.get(username, username)} (@{username})",
             )
         chile_only = st.sidebar.toggle("Sólo posts hechos desde Chile (CL)", value=False)
         export_only_high_views = st.sidebar.toggle("Exportar sólo posts con viewCount > 1000", value=False)

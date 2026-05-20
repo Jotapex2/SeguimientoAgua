@@ -46,8 +46,9 @@ SECTOR_TOPICS = {
     ],
     "Líderes del sector": [
         "jose antonio kast",
-        "martin arrau",
         "ivan poduje",
+        "louis de grange",
+        "nicolas balmaceda",
         "jorge quiroz",
         "joaquin daga",
     ],
@@ -80,19 +81,28 @@ COMPANIES = {
 
 PEOPLE = {
     "Presidente José Antonio Kast": ["jose antonio kast", "presidente jose antonio kast"],
-    "Ministro Martín Arrau": ["martin arrau", "ministro de obras publicas"],
-    "Iván Poduje": ["ivan poduje"],
+    "Iván Poduje": ["ivan poduje", "ministro ivan poduje", "ministro iván poduje", "poduje"],
+    "Louis de Grange": ["louis de grange", "louis de grange concha", "de grange", "louisdegrange"],
+    "Nicolás Balmaceda": [
+        "nicolas balmaceda",
+        "nicolás balmaceda",
+        "nicolas balmaceda jimeno",
+        "nicolás balmaceda jimeno",
+        "subsecretario de obras publicas",
+        "subsecretario de obras públicas",
+    ],
     "Jorge Quiroz": ["jorge quiroz"],
     "Joaquín Daga": ["joaquin daga"],
 }
 
-PRIORITY_PEOPLE = {
+PRIORITY_PEOPLE = [
     "Presidente José Antonio Kast",
-    "Ministro Martín Arrau",
     "Iván Poduje",
+    "Louis de Grange",
+    "Nicolás Balmaceda",
     "Jorge Quiroz",
     "Joaquín Daga",
-}
+]
 
 RISK_TERMS = [
     "crisis",
@@ -124,9 +134,21 @@ MONITOR_USERS = [
     "andesschile",
     "aguas_andinas",
     "mop_chile",
+    "louisdegrange",
+    "MTTChile",
     "superdesal",
     "gore_rm",
 ]
+
+MONITOR_ACCOUNTS = {
+    "andesschile": "Andess",
+    "aguas_andinas": "Aguas Andinas",
+    "mop_chile": "Ministerio de Obras Públicas",
+    "louisdegrange": "Louis de Grange",
+    "MTTChile": "Ministerio de Transportes y Telecomunicaciones",
+    "superdesal": "Superintendencia de Servicios Sanitarios",
+    "gore_rm": "Gobierno Regional Metropolitano",
+}
 
 
 def get_default_catalog() -> dict:
@@ -135,9 +157,10 @@ def get_default_catalog() -> dict:
             "sector_topics": SECTOR_TOPICS,
             "companies": COMPANIES,
             "people": PEOPLE,
-            "priority_people": sorted(PRIORITY_PEOPLE),
+            "priority_people": PRIORITY_PEOPLE,
             "risk_terms": RISK_TERMS,
             "chile_context_terms": CHILE_CONTEXT_TERMS,
             "monitor_users": MONITOR_USERS,
+            "monitor_accounts": MONITOR_ACCOUNTS,
         }
     )

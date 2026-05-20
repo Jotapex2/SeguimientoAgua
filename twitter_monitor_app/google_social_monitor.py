@@ -32,6 +32,10 @@ MAX_GOOGLE_PAGES_PER_KEYWORD = 20
 DEFAULT_GOOGLE_BACKOFF_SECONDS = 30.0
 GOOGLE_KEYWORDS_BATCH_SIZE = 5
 
+
+class GoogleRateLimitError(RuntimeError):
+    pass
+
 DATE_PATTERN = re.compile(
     r"\b(?:\d{1,2}\s+de\s+[a-zÃ¡Ã©Ã­Ã³ÃºÃ±]+(?:\s+de\s+\d{4})?|\d{1,2}/\d{1,2}/\d{2,4}|"
     r"(?:ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\.?\s+\d{1,2},?\s+\d{4})\b",
@@ -179,20 +183,30 @@ def score_result(keyword: str, title: str, snippet: str, url: str) -> int:
     return score
 
 
-def collect_monitor_results(keywords: list[str], results_per_kw: int, language: str, platform_name: str, lowercase: bool) -> pd.DataFrame:
+def collect_monitor_results(
+    keywords: list[str],
+    results_per_keyword: int,
+    language: str,
+    platform_name: str,
+    lowercase_text: bool,
+    min_delay_seconds: float = 0.0,
+    max_delay_seconds: float = 0.0,
+) -> pd.DataFrame:
     platform = PLATFORM_CONFIG[platform_name]
     session = build_session()
     all_results = []
     batches = list(chunk_list([k.strip() for k in keywords if k.strip()], GOOGLE_KEYWORDS_BATCH_SIZE))
     
-    for batch in batches:
-        all_results.extend(search_keywords_batch(session, batch, max(results_per_kw, 30), language, platform))
+    for index, batch in enumerate(batches):
+        all_results.extend(search_keywords_batch(session, batch, max(results_per_keyword, 30), language, platform))
+        if index < len(batches) - 1 and max_delay_seconds > 0:
+            time.sleep(random.uniform(min_delay_seconds, max_delay_seconds))
     
     df = pd.DataFrame(all_results)
     if df.empty: return pd.DataFrame(columns=["platform", "keyword", "titulo", "descripcion", "link", "fecha", "relevancia_score", "execution_timestamp"])
     
     df = df.drop_duplicates(subset=["keyword", "link"]).copy()
-    if lowercase:
+    if lowercase_text:
         for col in ("titulo", "descripcion"): df[col] = df[col].fillna("").str.lower()
     df["execution_timestamp"] = datetime.now(timezone.utc).isoformat()
     return df.sort_values(by=["keyword", "relevancia_score"], ascending=[True, False]).reset_index(drop=True)

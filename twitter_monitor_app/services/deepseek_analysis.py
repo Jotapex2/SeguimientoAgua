@@ -18,49 +18,52 @@ class DeepSeekAnalysisError(RuntimeError):
     pass
 
 
-SECTIONS = (
-    AnalysisSection(
-        title="Implicancias para la industria sanitaria",
-        focus=(
-            "Analiza las implicancias para la industria del agua potable y servicios "
-            "sanitarios en Chile. Identifica riesgos regulatorios, reputacionales, "
-            "operacionales y oportunidades de gestión pública."
-        ),
-        terms=(
-            "agua potable",
-            "sanitaria",
-            "sanitarias",
-            "aguas",
-            "siss",
-            "dga",
-            "mop",
-            "apr",
-            "tarifas",
-            "racionamiento",
-            "sequia",
-            "fiscalizacion",
-            "sanciones",
-        ),
+GENERAL_SECTION = AnalysisSection(
+    title="Implicancias para la industria sanitaria",
+    focus=(
+        "Analiza las implicancias para la industria del agua potable y servicios "
+        "sanitarios en Chile. Identifica riesgos regulatorios, reputacionales, "
+        "operacionales y oportunidades de gestión pública."
     ),
-    AnalysisSection(
-        title="Dichos y actividades del ministro Iván Poduje",
-        focus=(
-            "Resume dichos, señales, actividades o menciones vinculadas al ministro "
-            "Iván Poduje sobre agua potable, servicios sanitarios, infraestructura "
-            "hídrica, regulación o riesgo sectorial."
-        ),
-        terms=("ivan poduje", "poduje"),
-    ),
-    AnalysisSection(
-        title="Dichos y actividades del ministro Martín Arrau",
-        focus=(
-            "Resume dichos, señales, actividades o menciones vinculadas al ministro "
-            "Martín Arrau sobre agua potable, servicios sanitarios, infraestructura "
-            "hídrica, regulación o riesgo sectorial."
-        ),
-        terms=("martin arrau", "arrau", "ministro de obras publicas", "mop"),
+    terms=(
+        "agua potable",
+        "sanitaria",
+        "sanitarias",
+        "aguas",
+        "siss",
+        "dga",
+        "mop",
+        "apr",
+        "tarifas",
+        "racionamiento",
+        "sequia",
+        "fiscalizacion",
+        "sanciones",
     ),
 )
+
+
+def build_analysis_sections(catalog: dict) -> tuple[AnalysisSection, ...]:
+    priority_people = catalog.get("priority_people", [])
+    people_aliases = catalog.get("people", {})
+
+    sections: list[AnalysisSection] = [GENERAL_SECTION]
+    for person in priority_people:
+        aliases = tuple(people_aliases.get(person, []))
+        if not aliases:
+            continue
+        sections.append(
+            AnalysisSection(
+                title=f"Dichos y actividades de {person}",
+                focus=(
+                    f"Resume dichos, señales, actividades o menciones vinculadas a {person} "
+                    "sobre agua potable, servicios sanitarios, infraestructura hídrica, "
+                    "regulación o riesgo sectorial."
+                ),
+                terms=aliases,
+            )
+        )
+    return tuple(sections)
 
 
 def _row_text(row: pd.Series) -> str:
@@ -101,6 +104,26 @@ def _row_summary(row: pd.Series) -> str:
         f"  Texto: {str(text)[:600]}\n"
         f"  Link: {url}"
     )
+
+
+def section_cache_payload(section: AnalysisSection, rows: pd.DataFrame) -> dict:
+    evidence = []
+    for _, row in rows.iterrows():
+        evidence.append(
+            {
+                "id": row.get("id", ""),
+                "url": _row_url(row),
+                "text": str(row.get("text") or row.get("descripcion") or row.get("titulo") or "")[:600],
+                "keyword": row.get("matched_keyword") or row.get("keyword") or row.get("category_detected") or "",
+                "date": row.get("createdAt") or row.get("fecha") or "",
+            }
+        )
+    return {
+        "title": section.title,
+        "focus": section.focus,
+        "terms": section.terms,
+        "evidence": evidence,
+    }
 
 
 def select_related_rows(df: pd.DataFrame, terms: Iterable[str], fallback_limit: int = 8, fallback_to_all: bool = True) -> pd.DataFrame:

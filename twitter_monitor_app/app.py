@@ -32,10 +32,11 @@ if __package__:
     from twitter_monitor_app.services.classifier import post_process_tweets
     from twitter_monitor_app.services.data_manager import collect_api_data, mock_tweets
     from twitter_monitor_app.services.deepseek_analysis import (
-        SECTIONS,
         DeepSeekAnalysisError,
+        build_analysis_sections,
         related_links,
         request_deepseek_analysis,
+        section_cache_payload,
         select_related_rows,
     )
     from twitter_monitor_app.services.email_sender import (
@@ -44,7 +45,7 @@ if __package__:
         send_report_email,
     )
     from twitter_monitor_app.services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
-    from twitter_monitor_app.services.runtime_store import get_history_count, persist_history
+    from twitter_monitor_app.services.runtime_store import get_history_count, load_cache, make_cache_key, persist_history, save_cache
     from twitter_monitor_app.services.scoring import enrich_scores
     from twitter_monitor_app.services.twitter_client import TwitterApiError
 else:
@@ -62,15 +63,16 @@ else:
     from services.classifier import post_process_tweets
     from services.data_manager import collect_api_data, mock_tweets
     from services.deepseek_analysis import (
-        SECTIONS,
         DeepSeekAnalysisError,
+        build_analysis_sections,
         related_links,
         request_deepseek_analysis,
+        section_cache_payload,
         select_related_rows,
     )
     from services.email_sender import EmailDeliveryError, is_email_delivery_configured, send_report_email
     from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
-    from services.runtime_store import get_history_count, persist_history
+    from services.runtime_store import get_history_count, load_cache, make_cache_key, persist_history, save_cache
     from services.scoring import enrich_scores
     from services.twitter_client import TwitterApiError
 
@@ -232,7 +234,7 @@ def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_n
     st.success(f"Informe enviado a: {', '.join(recipients)}")
 
 
-def render_deepseek_analysis(df: pd.DataFrame, source_label: str, existing_sections: List[Dict] | None = None) -> List[Dict]:
+def render_deepseek_analysis(df: pd.DataFrame, source_label: str, catalog: dict, existing_sections: List[Dict] | None = None) -> List[Dict]:
     st.subheader("Análisis DeepSeek")
     if existing_sections is not None:
         for section in existing_sections:
@@ -257,21 +259,31 @@ def render_deepseek_analysis(df: pd.DataFrame, source_label: str, existing_secti
         return []
 
     analysis_sections: List[Dict] = []
-    for section in SECTIONS:
+    for section in build_analysis_sections(catalog):
         fallback_to_all = section.title == "Implicancias para la industria sanitaria"
         rows = select_related_rows(df, section.terms, fallback_to_all=fallback_to_all)
         links = related_links(rows)
         with st.spinner(f"Generando análisis: {section.title}..."):
-            try:
-                analysis = request_deepseek_analysis(
-                    api_key=settings.deepseek_api_key,
-                    api_url=settings.deepseek_api_url,
-                    model=settings.deepseek_model,
-                    section=section,
-                    rows=rows,
-                )
-            except DeepSeekAnalysisError as exc:
-                analysis = f"No se pudo generar esta sección: {exc}"
+            cache_key = make_cache_key(
+                "llm_analysis",
+                {
+                    "model": settings.deepseek_model,
+                    "section": section_cache_payload(section, rows),
+                },
+            )
+            analysis = load_cache(cache_key, settings.default_cache_ttl_hours)
+            if analysis is None:
+                try:
+                    analysis = request_deepseek_analysis(
+                        api_key=settings.deepseek_api_key,
+                        api_url=settings.deepseek_api_url,
+                        model=settings.deepseek_model,
+                        section=section,
+                        rows=rows,
+                    )
+                    save_cache(cache_key, analysis)
+                except DeepSeekAnalysisError as exc:
+                    analysis = f"No se pudo generar esta sección: {exc}"
 
         analysis_sections.append({"title": section.title, "analysis": analysis, "links": links})
         st.markdown(f"#### {section.title}")
@@ -285,7 +297,7 @@ def render_deepseek_analysis(df: pd.DataFrame, source_label: str, existing_secti
     return analysis_sections
 
 
-def render_x_app_dashboard(filters: Dict, df: pd.DataFrame, query_stats: Dict, analysis_sections: List[Dict] | None = None) -> List[Dict]:
+def render_x_app_dashboard(filters: Dict, df: pd.DataFrame, query_stats: Dict, catalog: dict, analysis_sections: List[Dict] | None = None) -> List[Dict]:
     render_kpis(df)
     render_limitations(df)
     render_efficiency_summary(filters, query_stats, df)
@@ -295,7 +307,7 @@ def render_x_app_dashboard(filters: Dict, df: pd.DataFrame, query_stats: Dict, a
     st.subheader("Resultados")
     render_results_table(df)
 
-    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), analysis_sections)
+    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), catalog, analysis_sections)
 
     st.subheader("Visualizaciones")
     render_charts(df)
@@ -325,6 +337,7 @@ def render_google_dashboard(
     filters: Dict,
     df: pd.DataFrame,
     google_keywords: Iterable[str],
+    catalog: dict,
     analysis_sections: List[Dict] | None = None,
 ) -> List[Dict]:
     render_google_metrics(df)
@@ -333,7 +346,7 @@ def render_google_dashboard(
     st.subheader("Resultados")
     render_google_results(df)
 
-    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), analysis_sections)
+    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), catalog, analysis_sections)
 
     st.subheader("Exportación")
     export_name = build_google_export_name(filters)
@@ -356,12 +369,14 @@ def render_last_monitor_payload() -> bool:
     if not payload:
         return False
 
+    catalog = st.session_state.get("catalog", get_default_catalog())
     st.info("Mostrando los últimos resultados generados. Ejecuta nuevamente el monitoreo para refrescar datos.")
     if payload["mode"] == "x_app":
         render_x_app_dashboard(
             payload["filters"],
             payload["df"],
             payload["query_stats"],
+            catalog,
             payload.get("analysis_sections"),
         )
         return True
@@ -370,6 +385,7 @@ def render_last_monitor_payload() -> bool:
         payload["filters"],
         payload["df"],
         payload.get("google_keywords", []),
+        catalog,
         payload.get("analysis_sections"),
     )
     return True
@@ -481,7 +497,7 @@ def main():
             df = build_dataframe(processed, catalog)
             persist_history(df.to_dict(orient="records"))
 
-        analysis_sections = render_x_app_dashboard(filters, df, query_stats)
+        analysis_sections = render_x_app_dashboard(filters, df, query_stats, catalog)
         st.session_state["last_monitor_payload"] = {
             "mode": "x_app",
             "filters": filters,
@@ -519,7 +535,7 @@ def main():
             st.error(str(exc))
             return
 
-    analysis_sections = render_google_dashboard(filters, df, google_keywords)
+    analysis_sections = render_google_dashboard(filters, df, google_keywords, catalog)
     st.session_state["last_monitor_payload"] = {
         "mode": "google",
         "filters": filters,
