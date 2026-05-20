@@ -19,6 +19,7 @@ La integración está basada en `twitterapi.io`, no en la API oficial de X/Twitt
 - Dashboard ejecutivo con KPIs, rankings y gráficos.
 - Exportación a CSV y Excel.
 - Envío de informe por correo con adjunto Excel vía SMTP.
+- Análisis ejecutivo con DeepSeek Chat en tres secciones: industria sanitaria, ministro Iván Poduje y ministro Martín Arrau.
 - Modo simulación sin API para probar la UI.
 - Caché local en disco para evitar consultas repetidas.
 - Modo incremental para traer sólo posts nuevos por query.
@@ -81,9 +82,12 @@ SMTP_USERNAME=usuario@example.com
 SMTP_PASSWORD=your_smtp_password
 SMTP_USE_TLS=true
 EMAIL_FROM=usuario@example.com
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
-El envío de correo usa SMTP y adjunta el informe en formato Excel desde la sección de exportación.
+El envío de correo usa SMTP y adjunta el informe en formato Excel desde la sección de exportación. Si `DEEPSEEK_API_KEY` está configurada, el cuerpo del correo incluye las tres secciones de análisis y links relacionados.
 
 ## Instalación
 

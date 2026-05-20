@@ -31,6 +31,13 @@ if __package__:
     )
     from twitter_monitor_app.services.classifier import post_process_tweets
     from twitter_monitor_app.services.data_manager import collect_api_data, mock_tweets
+    from twitter_monitor_app.services.deepseek_analysis import (
+        SECTIONS,
+        DeepSeekAnalysisError,
+        related_links,
+        request_deepseek_analysis,
+        select_related_rows,
+    )
     from twitter_monitor_app.services.email_sender import (
         EmailDeliveryError,
         is_email_delivery_configured,
@@ -54,6 +61,13 @@ else:
     from google_social_monitor import GoogleRateLimitError, MAX_GOOGLE_PAGES_PER_KEYWORD, collect_monitor_results
     from services.classifier import post_process_tweets
     from services.data_manager import collect_api_data, mock_tweets
+    from services.deepseek_analysis import (
+        SECTIONS,
+        DeepSeekAnalysisError,
+        related_links,
+        request_deepseek_analysis,
+        select_related_rows,
+    )
     from services.email_sender import EmailDeliveryError, is_email_delivery_configured, send_report_email
     from services.exporter import dataframe_to_csv_bytes, dataframe_to_excel_bytes
     from services.runtime_store import get_history_count, persist_history
@@ -140,7 +154,29 @@ def build_report_mail_subject(filters: Dict) -> str:
     )
 
 
-def build_report_mail_body(filters: Dict, export_df: pd.DataFrame) -> str:
+def format_analysis_for_email(analysis_sections: List[Dict] | None) -> str:
+    if not analysis_sections:
+        return ""
+
+    blocks = ["", "Análisis DeepSeek:"]
+    for section in analysis_sections:
+        links = section.get("links", [])
+        link_lines = "\n".join(f"- {link}" for link in links) if links else "- Sin links relacionados."
+        blocks.append(
+            "\n".join(
+                [
+                    "",
+                    section.get("title", "Sección"),
+                    section.get("analysis", "Sin análisis disponible."),
+                    "Links relacionados:",
+                    link_lines,
+                ]
+            )
+        )
+    return "\n".join(blocks)
+
+
+def build_report_mail_body(filters: Dict, export_df: pd.DataFrame, analysis_sections: List[Dict] | None = None) -> str:
     selected_groups = [
         f"Categorías: {', '.join(filters['selected_categories']) or 'sin selección'}",
         f"Personas: {', '.join(filters['selected_people']) or 'sin selección'}",
@@ -153,10 +189,13 @@ def build_report_mail_body(filters: Dict, export_df: pd.DataFrame) -> str:
         f"Total de registros exportados: {len(export_df)}",
         *selected_groups,
     ]
+    analysis_text = format_analysis_for_email(analysis_sections)
+    if analysis_text:
+        summary_lines.append(analysis_text)
     return "\n".join(summary_lines)
 
 
-def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_name: str):
+def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_name: str, analysis_sections: List[Dict] | None = None):
     st.markdown("#### Enviar por correo")
     if export_df.empty:
         st.caption("No hay datos para adjuntar en el informe.")
@@ -182,7 +221,7 @@ def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_n
         send_report_email(
             recipients=recipients,
             subject=subject.strip() or build_report_mail_subject(filters),
-            body=build_report_mail_body(filters, export_df),
+            body=build_report_mail_body(filters, export_df, analysis_sections),
             attachment_name=attachment_name,
             attachment_bytes=attachment_bytes,
         )
@@ -191,6 +230,149 @@ def render_email_report_section(filters: Dict, export_df: pd.DataFrame, export_n
         return
 
     st.success(f"Informe enviado a: {', '.join(recipients)}")
+
+
+def render_deepseek_analysis(df: pd.DataFrame, source_label: str, existing_sections: List[Dict] | None = None) -> List[Dict]:
+    st.subheader("Análisis DeepSeek")
+    if existing_sections is not None:
+        for section in existing_sections:
+            st.markdown(f"#### {section.get('title', 'Sección')}")
+            st.markdown(section.get("analysis", "Sin análisis disponible."))
+            links = section.get("links", [])
+            if links:
+                st.markdown("Links relacionados:")
+                for link in links:
+                    st.markdown(f"- [{link}]({link})")
+            else:
+                st.caption(f"Sin links relacionados en los resultados de {source_label}.")
+        return existing_sections
+
+    if df.empty:
+        st.caption("No hay resultados para analizar.")
+        return []
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        st.warning("Falta configurar `DEEPSEEK_API_KEY` en `.env` para generar el análisis automático.")
+        return []
+
+    analysis_sections: List[Dict] = []
+    for section in SECTIONS:
+        fallback_to_all = section.title == "Implicancias para la industria sanitaria"
+        rows = select_related_rows(df, section.terms, fallback_to_all=fallback_to_all)
+        links = related_links(rows)
+        with st.spinner(f"Generando análisis: {section.title}..."):
+            try:
+                analysis = request_deepseek_analysis(
+                    api_key=settings.deepseek_api_key,
+                    api_url=settings.deepseek_api_url,
+                    model=settings.deepseek_model,
+                    section=section,
+                    rows=rows,
+                )
+            except DeepSeekAnalysisError as exc:
+                analysis = f"No se pudo generar esta sección: {exc}"
+
+        analysis_sections.append({"title": section.title, "analysis": analysis, "links": links})
+        st.markdown(f"#### {section.title}")
+        st.markdown(analysis)
+        if links:
+            st.markdown("Links relacionados:")
+            for link in links:
+                st.markdown(f"- [{link}]({link})")
+        else:
+            st.caption(f"Sin links relacionados en los resultados de {source_label}.")
+    return analysis_sections
+
+
+def render_x_app_dashboard(filters: Dict, df: pd.DataFrame, query_stats: Dict, analysis_sections: List[Dict] | None = None) -> List[Dict]:
+    render_kpis(df)
+    render_limitations(df)
+    render_efficiency_summary(filters, query_stats, df)
+    if filters["chile_only"]:
+        st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
+
+    st.subheader("Resultados")
+    render_results_table(df)
+
+    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), analysis_sections)
+
+    st.subheader("Visualizaciones")
+    render_charts(df)
+
+    st.subheader("Rankings")
+    render_rankings(df)
+
+    st.subheader("Exportación")
+    export_df = build_export_dataframe(df, filters["export_only_high_views"])
+    if filters["export_only_high_views"]:
+        st.caption(f"Exportación filtrada: {len(export_df)} posts con viewCount mayor a 1000.")
+    if not export_df.empty:
+        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(export_df), file_name="twitter_monitor_results.csv", mime="text/csv")
+        st.download_button(
+            "Descargar Excel",
+            data=dataframe_to_excel_bytes(export_df),
+            file_name="twitter_monitor_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        render_email_report_section(filters, export_df, "twitter_monitor_results", analysis_sections)
+    else:
+        st.caption("Sin datos exportables con el filtro actual.")
+    return analysis_sections
+
+
+def render_google_dashboard(
+    filters: Dict,
+    df: pd.DataFrame,
+    google_keywords: Iterable[str],
+    analysis_sections: List[Dict] | None = None,
+) -> List[Dict]:
+    render_google_metrics(df)
+    render_google_summary(filters, google_keywords, df)
+
+    st.subheader("Resultados")
+    render_google_results(df)
+
+    analysis_sections = render_deepseek_analysis(df, format_google_mode(filters), analysis_sections)
+
+    st.subheader("Exportación")
+    export_name = build_google_export_name(filters)
+    if not df.empty:
+        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(df), file_name=f"{export_name}.csv", mime="text/csv")
+        st.download_button(
+            "Descargar Excel",
+            data=dataframe_to_excel_bytes(df),
+            file_name=f"{export_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        render_email_report_section(filters, df, export_name, analysis_sections)
+    else:
+        st.caption("Sin datos exportables con el filtro actual.")
+    return analysis_sections
+
+
+def render_last_monitor_payload() -> bool:
+    payload = st.session_state.get("last_monitor_payload")
+    if not payload:
+        return False
+
+    st.info("Mostrando los últimos resultados generados. Ejecuta nuevamente el monitoreo para refrescar datos.")
+    if payload["mode"] == "x_app":
+        render_x_app_dashboard(
+            payload["filters"],
+            payload["df"],
+            payload["query_stats"],
+            payload.get("analysis_sections"),
+        )
+        return True
+
+    render_google_dashboard(
+        payload["filters"],
+        payload["df"],
+        payload.get("google_keywords", []),
+        payload.get("analysis_sections"),
+    )
+    return True
 
 
 def format_google_mode(filters: Dict) -> str:
@@ -271,6 +453,8 @@ def main():
     st.caption(f"Fuente seleccionada: {format_google_mode(filters)}.")
 
     if not filters["run"]:
+        if render_last_monitor_payload():
+            return
         st.info("Configura filtros y ejecuta el monitoreo. Puedes alternar entre LinkedIn/Google, X/App y X/Google desde la barra lateral.")
         return
 
@@ -297,36 +481,14 @@ def main():
             df = build_dataframe(processed, catalog)
             persist_history(df.to_dict(orient="records"))
 
-        render_kpis(df)
-        render_limitations(df)
-        render_efficiency_summary(filters, query_stats, df)
-        if filters["chile_only"]:
-            st.caption("Filtro activo: sólo se muestran posts detectados como originados en Chile (CL).")
-
-        st.subheader("Resultados")
-        render_results_table(df)
-
-        st.subheader("Visualizaciones")
-        render_charts(df)
-
-        st.subheader("Rankings")
-        render_rankings(df)
-
-        st.subheader("Exportación")
-        export_df = build_export_dataframe(df, filters["export_only_high_views"])
-        if filters["export_only_high_views"]:
-            st.caption(f"Exportación filtrada: {len(export_df)} posts con viewCount mayor a 1000.")
-        if not export_df.empty:
-            st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(export_df), file_name="twitter_monitor_results.csv", mime="text/csv")
-            st.download_button(
-                "Descargar Excel",
-                data=dataframe_to_excel_bytes(export_df),
-                file_name="twitter_monitor_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-            render_email_report_section(filters, export_df, "twitter_monitor_results")
-        else:
-            st.caption("Sin datos exportables con el filtro actual.")
+        analysis_sections = render_x_app_dashboard(filters, df, query_stats)
+        st.session_state["last_monitor_payload"] = {
+            "mode": "x_app",
+            "filters": filters,
+            "df": df,
+            "query_stats": query_stats,
+            "analysis_sections": analysis_sections,
+        }
         return
 
     google_platform = "linkedin" if filters["search_platform"] == "LinkedIn" else "x"
@@ -357,25 +519,14 @@ def main():
             st.error(str(exc))
             return
 
-    render_google_metrics(df)
-    render_google_summary(filters, google_keywords, df)
-
-    st.subheader("Resultados")
-    render_google_results(df)
-
-    st.subheader("Exportación")
-    export_name = build_google_export_name(filters)
-    if not df.empty:
-        st.download_button("Descargar CSV", data=dataframe_to_csv_bytes(df), file_name=f"{export_name}.csv", mime="text/csv")
-        st.download_button(
-            "Descargar Excel",
-            data=dataframe_to_excel_bytes(df),
-            file_name=f"{export_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        render_email_report_section(filters, df, export_name)
-    else:
-        st.caption("Sin datos exportables con el filtro actual.")
+    analysis_sections = render_google_dashboard(filters, df, google_keywords)
+    st.session_state["last_monitor_payload"] = {
+        "mode": "google",
+        "filters": filters,
+        "df": df,
+        "google_keywords": list(google_keywords),
+        "analysis_sections": analysis_sections,
+    }
 
 
 if __name__ == "__main__":

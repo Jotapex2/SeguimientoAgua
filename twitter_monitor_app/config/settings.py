@@ -29,6 +29,9 @@ class AppConfig:
     smtp_password: str = os.getenv("SMTP_PASSWORD", "")
     smtp_use_tls: bool = os.getenv("SMTP_USE_TLS", "true").strip().lower() in {"1", "true", "yes", "on"}
     email_from: str = os.getenv("EMAIL_FROM", "")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+    deepseek_api_url: str = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions")
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     runtime_dir: Path = Path(__file__).resolve().parents[1] / "data" / "runtime"
     supported_languages: List[str] = field(default_factory=lambda: ["es"])
     priority_people_boost: float = 10.0
